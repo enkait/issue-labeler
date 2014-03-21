@@ -104,6 +104,7 @@ class RepoCollector:
     WAIT_SECS = 600
 
     def wait_api(self):
+        # TODO: watch out for separate rate limit for search and other
         while self.api.get_rate_limit() < self.API_THRESHOLD:
             logging.info("Waiting for %d seconds" % (self.WAIT_SECS))
             self.sleeper.sleep(self.WAIT_SECS)
