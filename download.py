@@ -78,12 +78,24 @@ class Sleeper:
     def sleep(self, secs):
         time.sleep(secs)
 
-class FileStore:
+class AppendStore:
     def __init__(self, file_path):
         self.f = open(file_path, "a+")
 
     def store(self, element):
         self.f.write(json.dumps(element.raw_data)+"\n")
+
+class OverwriteStore:
+    def __init__(self, file_path):
+        self.file_path = file_path
+
+    def store(self, element):
+        with open(self.file_path, "w") as f:
+            f.write(json.dumps(element))
+
+    def load(self):
+        with open(self.file_path, "r") as f:
+            return json.loads(f.read())
 
 class MemoryStore:
     def __init__(self):
@@ -97,8 +109,6 @@ class MemoryStore:
 
 class RepoCollector:
     labels = ["enhancement", "bug", "feature", "question"]
-    LOW_STARS = 100
-    HIGH_STARS = 100000
     GITHUB_LIMIT = 1000
     API_THRESHOLD = 10
     WAIT_SECS = 600
@@ -114,6 +124,32 @@ class RepoCollector:
         for elem in result:
             self.store.store(elem)
 
+    def enqueue(self, low, high):
+        self.queue.append((low, high))
+
+    def enqueue_all(self, L):
+        self.queue += L
+
+    def dequeue(self):
+        val = self.queue[0]
+        self.queue = self.queue[1:]
+        return val
+
+    def save_queue(self):
+        self.queue_store.store(self.queue)
+
+    def load_queue(self):
+        self.queue = self.queue_store.load()
+
+    def execute_all(self):
+        while len(self.queue) > 0:
+            self.execute_once()
+
+    def execute_once(self):
+        low, high = self.dequeue()
+        self.find_all(low, high)
+        self.save_queue()
+
     def find_all(self, low, high):
         logging.info("Descending into: [%d, %d]" % (low, high))
         self.wait_api()
@@ -124,17 +160,16 @@ class RepoCollector:
         if low == high:
             logging.warn("Can not dissect further: %d stars has %d results" % (low, query_result.totalCount))
             return
-        self.find_all((high + low) / 2 + 1, high)
-        self.find_all(low, (high + low) / 2)
+        self.enqueue((high + low) / 2 + 1, high)
+        self.enqueue(low, (high + low) / 2)
 
-    def find_good(self):
-        self.find_all(self.LOW_STARS, self.HIGH_STARS)
-
-    def __init__(self, api, store, sleeper = Sleeper()):
+    def __init__(self, api, store, queue_store, sleeper = Sleeper()):
         self.api = api
         self.sleeper = sleeper
         self.store = store
+        self.queue_store = queue_store
         self.repos = []
+        self.queue = []
 
         #print "Title:"
         #pprint.pprint(issue.title)
@@ -180,8 +215,10 @@ def main(argv):
         print "Testing"
         mg = MockGithub()
         ms = MemoryStore()
-        rc = RepoCollector(mg, ms, mg)
-        rc.find_all(10, 40000)
+        qs = MemoryStore()
+        rc = RepoCollector(mg, ms, qs, mg)
+        rc.enqueue(10, 40000)
+        rc.execute_all()
         result = ms.get_stored()
         expected = mg.get_repos(10, 40000)
         if len(result) != len(expected):
@@ -191,7 +228,9 @@ def main(argv):
         print "OK"
         return
 
-    filename = "repos." + datetime.datetime.now().isoformat()
+    cur_time = datetime.datetime.now().isoformat()
+    filename = "repos." + cur_time
+    queuename = "queue"
     relpath = "collection/" + filename
     latestrelpath = "collection/repos.latest"
 
@@ -199,8 +238,13 @@ def main(argv):
         os.unlink(latestrelpath)
     os.symlink(filename, latestrelpath)
     gh = GithubAPIWrapper(args.user, args.password)
-    rc = RepoCollector(gh, FileStore(relpath))
-    rc.find_good()
+    if os.path.exists(queuename):
+        rc = RepoCollector(gh, AppendStore(relpath), OverwriteStore(queuename))
+        rc.load_queue()
+    else:
+        rc = RepoCollector(gh, AppendStore(relpath), OverwriteStore(queuename))
+        rc.enqueue(100, 100000)
+    rc.execute_all()
 
 if __name__ == "__main__":
     main(sys.argv)
