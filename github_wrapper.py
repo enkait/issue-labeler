@@ -3,6 +3,7 @@ import time
 from collections import defaultdict
 from github import Github
 from github.GithubException import GithubException
+from github.Repository import Repository
 
 class GithubAPIWrapper:
     def __init__(self, user, password):
@@ -16,6 +17,9 @@ class GithubAPIWrapper:
 
     def query_by_stars(self, low, high):
         return self.g.search_repositories("stars:%d..%d" % (low, high))
+
+    def load_repo(self, raw):
+        return self.g.create_from_raw_data(Repository, raw)
 
     def sleep(self, secs):
         time.sleep(secs)
