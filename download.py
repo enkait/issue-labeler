@@ -35,11 +35,24 @@ class MockGithub:
     GITHUB_LIMIT = 1000
 
     def __init__(self):
-        self.api_rate_limit = 30
+        self.api_rate_limit = 300
         self.repositories = defaultdict(list)
-        for i in range(50000):
-            for j in range(20):
-                self.repositories[i].append("%d/%d" % (i, j))
+        class MockRepo:
+            def __init__(self, parent, raw_data):
+                self.parent = parent
+                self._raw_data = raw_data
+
+            @property
+            def raw_data(self):
+                if self.parent.api_rate_limit <= 0:
+                    raise Exception("Code shouldn't iterate when there are no more api calls")
+                self.parent.api_rate_limit -= 1
+                return self._raw_data
+
+        for i in range(10100):
+            for j in range(7):
+                self.repositories[i].append(MockRepo(self, "%d/%d" % (i, j)))
+        print "Done"
 
     def get_rate_limit(self):
         return self.api_rate_limit
@@ -52,6 +65,10 @@ class MockGithub:
         for i in range(low, high+1):
             L += self.repositories[i]
         return L
+
+    def get_raw_repos(self, low, high):
+        L = self.get_repos(low, high)
+        return [o._raw_data for o in L]
 
     def query_by_stars(self, low, high):
         if self.api_rate_limit == 0:
@@ -72,7 +89,7 @@ class MockGithub:
         return QueryResult(self.get_repos(low, high), self.GITHUB_LIMIT)
 
     def sleep(self, secs):
-        self.api_rate_limit = 30
+        self.api_rate_limit = 300
 
 class Sleeper:
     def sleep(self, secs):
@@ -83,7 +100,7 @@ class AppendStore:
         self.f = open(file_path, "a+")
 
     def store(self, element):
-        self.f.write(json.dumps(element.raw_data)+"\n")
+        self.f.write(json.dumps(element)+"\n")
 
 class OverwriteStore:
     def __init__(self, file_path):
@@ -122,7 +139,8 @@ class RepoCollector:
 
     def save_all(self, result):
         for elem in result:
-            self.store.store(elem)
+            self.wait_api()
+            self.store.store(elem.raw_data)
 
     def enqueue(self, low, high):
         self.queue.append((low, high))
@@ -217,10 +235,10 @@ def main(argv):
         ms = MemoryStore()
         qs = MemoryStore()
         rc = RepoCollector(mg, ms, qs, mg)
-        rc.enqueue(10, 40000)
+        rc.enqueue(10, 10000)
         rc.execute_all()
         result = ms.get_stored()
-        expected = mg.get_repos(10, 40000)
+        expected = mg.get_raw_repos(10, 10000)
         if len(result) != len(expected):
             raise Exception("Length of result and expected differs")
         if set(result) != set(expected):
