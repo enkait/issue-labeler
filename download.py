@@ -2,13 +2,9 @@ import sys
 import os
 import datetime
 import argparse
-from github import Github
-from github.GithubException import GithubException
-import pprint
-import json
 import logging
-import time
-from collections import defaultdict
+from github_wrapper import GithubAPIWrapper, MockGithub
+from stores import MemoryStore, OverwriteStore, AppendStore
 
 parser = argparse.ArgumentParser(description='Download data for processing')
 parser.add_argument('-user', type=str, help='username for github API')
@@ -17,112 +13,6 @@ parser.add_argument('--test', dest='test', action='store_true', help='only run t
 
 logging.basicConfig(level=logging.INFO, filename="download_log", filemode="a+",
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-
-class GithubAPIWrapper:
-    def __init__(self, user, password):
-        self.g = Github(user, password)
-
-    def get_rate_limit(self):
-        return self.g.get_rate_limit().rate.remaining
-
-    def get_api_status(self):
-        return self.g.get_api_status().status
-
-    def query_by_stars(self, low, high):
-        return self.g.search_repositories("stars:%d..%d" % (low, high))
-
-class MockGithub:
-    GITHUB_LIMIT = 1000
-
-    def __init__(self):
-        self.api_rate_limit = 300
-        self.repositories = defaultdict(list)
-        class MockRepo:
-            def __init__(self, parent, raw_data):
-                self.parent = parent
-                self._raw_data = raw_data
-
-            @property
-            def raw_data(self):
-                if self.parent.api_rate_limit <= 0:
-                    raise Exception("Code shouldn't iterate when there are no more api calls")
-                self.parent.api_rate_limit -= 1
-                return self._raw_data
-
-        for i in range(10100):
-            for j in range(7):
-                self.repositories[i].append(MockRepo(self, "%d/%d" % (i, j)))
-        print "Done"
-
-    def get_rate_limit(self):
-        return self.api_rate_limit
-
-    def get_api_status(self):
-        return "OK"
-
-    def get_repos(self, low, high):
-        L = []
-        for i in range(low, high+1):
-            L += self.repositories[i]
-        return L
-
-    def get_raw_repos(self, low, high):
-        L = self.get_repos(low, high)
-        return [o._raw_data for o in L]
-
-    def query_by_stars(self, low, high):
-        if self.api_rate_limit == 0:
-            raise Exception("API rate limit hit")
-        self.api_rate_limit -= 1
-
-        class QueryResult:
-            def __init__(self, L, limit):
-                self.L = L
-                self.totalCount = len(L)
-                self.limit = limit
-
-            def __iter__(self):
-                if len(self.L) > self.limit:
-                    raise Exception("Code shouldn't iterate when there are more than %d results" % (self.limit,))
-                return iter(self.L)
-
-        return QueryResult(self.get_repos(low, high), self.GITHUB_LIMIT)
-
-    def sleep(self, secs):
-        self.api_rate_limit = 300
-
-class Sleeper:
-    def sleep(self, secs):
-        time.sleep(secs)
-
-class AppendStore:
-    def __init__(self, file_path):
-        self.f = open(file_path, "a+")
-
-    def store(self, element):
-        self.f.write(json.dumps(element)+"\n")
-
-class OverwriteStore:
-    def __init__(self, file_path):
-        self.file_path = file_path
-
-    def store(self, element):
-        with open(self.file_path, "w") as f:
-            f.write(json.dumps(element))
-
-    def load(self):
-        with open(self.file_path, "r") as f:
-            return json.loads(f.read())
-
-class MemoryStore:
-    def __init__(self):
-        self.L = []
-
-    def store(self, element):
-        self.L.append(element)
-
-    def get_stored(self):
-        return self.L
 
 class RepoCollector:
     labels = ["enhancement", "bug", "feature", "question"]
@@ -134,7 +24,7 @@ class RepoCollector:
         # TODO: watch out for separate rate limit for search and other
         while self.api.get_rate_limit() < self.API_THRESHOLD:
             logging.info("Waiting for %d seconds" % (self.WAIT_SECS))
-            self.sleeper.sleep(self.WAIT_SECS)
+            self.api.sleep(self.WAIT_SECS)
         self.log_diag()
 
     def save_all(self, result):
@@ -181,45 +71,12 @@ class RepoCollector:
         self.enqueue((high + low) / 2 + 1, high)
         self.enqueue(low, (high + low) / 2)
 
-    def __init__(self, api, store, queue_store, sleeper = Sleeper()):
+    def __init__(self, api, store, queue_store):
         self.api = api
-        self.sleeper = sleeper
         self.store = store
         self.queue_store = queue_store
         self.repos = []
         self.queue = []
-
-        #print "Title:"
-        #pprint.pprint(issue.title)
-        #print "User:"
-        #pprint.pprint(issue.user.login)
-        #print "Labels:"
-        #for label in issue.labels:
-        #    pprint.pprint(label.name)
-        #print "Body:"
-        #pprint.pprint(issue.body)
-        #TODO: escape before saving/replace with spaces
-
-        print self.api.query_by_stars(100, 1000).totalCount
-
-        #for repo in self.g.search_repos():
-        #    try:
-        #        output.write(json.dumps(repo.raw_data) + "\n")
-        #    except GithubException as ex:
-        #        logging.exception("Exception received")
-
-        #for repo in self.g.get_repos():
-        #    try:
-        #        output.write(json.dumps(repo.raw_data) + "\n")
-        #    except GithubException as ex:
-        #        logging.exception("Exception received")
-
-        #for label in self.labels:
-        #    for issue in g.search_issues("label:" + label + " comments:>0"):
-        #        try:
-        #            output.write(json.dumps(issue.raw_data) + "\n")
-        #        except GithubException as ex:
-        #            logging.exception("Exception received")
         self.log_diag()
 
     def log_diag(self):
@@ -234,7 +91,7 @@ def main(argv):
         mg = MockGithub()
         ms = MemoryStore()
         qs = MemoryStore()
-        rc = RepoCollector(mg, ms, qs, mg)
+        rc = RepoCollector(mg, ms, qs)
         rc.enqueue(10, 10000)
         rc.execute_all()
         result = ms.get_stored()
