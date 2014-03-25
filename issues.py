@@ -33,53 +33,55 @@ class IssueCollector:
             self.wait_api()
             self.store.store(elem.raw_data)
 
-    def enqueue(self, low, high):
-        self.queue.append((low, high))
-
-    def enqueue_all(self, L):
-        self.queue += L
-
-    def dequeue(self):
-        val = self.queue[0]
-        self.queue = self.queue[1:]
-        return val
-
     def save_queue(self):
-        self.queue_store.store(self.queue)
+        self.queue_store.store(self.done)
 
     def load_queue(self):
-        self.queue = self.queue_store.load()
+        self.prev_done = self.queue_store.load()
 
     def execute_all(self):
-        while len(self.queue) > 0:
-            self.execute_once()
+        for i in range(self.prev_done):
+            self.repo_source.next() # drop this many elements
 
-    def execute_once(self):
-        repo = self.dequeue()
-        self.find_all(repo)
-        self.save_queue()
+        self.done = self.prev_done
+
+        for repo in self.repo_source:
+            self.find_all(repo)
+            self.done += 1
+            self.save_queue()
+
 
     def find_all(self, repo):
         logging.info("Getting issues for: %s" % (repo.full_name))
+        if not repo.has_issues:
+            return
         for label in repo.get_labels():
             if label.name in self.LABELS:
                 self.wait_api()
                 self.save_all(repo.get_issues(state="all", labels=[label]))
 
-    def __init__(self, api, store, queue_store):
+    def __init__(self, api, store, queue_store, repo_source):
         self.api = api
         self.store = store
         self.queue_store = queue_store
         self.queue = []
+        self.prev_done = 0
+        self.done = 0
+        self.repo_source = repo_source
+
         self.log_diag()
 
     def log_diag(self):
         logging.info("API status: %s", self.api.get_api_status())
         logging.info("Current rate limit (QPH): %s", self.api.get_rate_limit())
 
-def get_repos(repo_file):
+def get_repos(repo_file, gh):
     with open(repo_file) as f:
-        yield json.loads(f.readline().strip())
+        while True:
+            line = f.readline()
+            if not line:
+                break
+            yield gh.load_repo(json.loads(line.strip()))
 
 def main(argv):
     args = parser.parse_args()
@@ -95,12 +97,10 @@ def main(argv):
         os.unlink(latestrelpath)
     os.symlink(filename, latestrelpath)
     gh = GithubAPIWrapper(args.user, args.password)
+    repo_source = get_repos(repo_filename, gh)
+    ic = IssueCollector(gh, AppendStore(relpath), OverwriteStore(queuename), get_repos(repo_filename, gh))
     if os.path.exists(queuename):
-        ic = IssueCollector(gh, AppendStore(relpath), OverwriteStore(queuename))
         ic.load_queue()
-    else:
-        ic = IssueCollector(gh, AppendStore(relpath), OverwriteStore(queuename))
-        ic.enqueue_all(map(gh.load_repo, get_repos(repo_filename)))
     print "OMG"
     ic.execute_all()
 
