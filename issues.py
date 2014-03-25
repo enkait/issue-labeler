@@ -12,7 +12,7 @@ parser.add_argument('-user', type=str, help='username for github API')
 parser.add_argument('-password', type=str, help='password for github API')
 parser.add_argument('--test', dest='test', action='store_true', help='only run tests')
 
-logging.basicConfig(level=logging.INFO, filename="download_log", filemode="a+",
+logging.basicConfig(level=logging.INFO, filename="issues_log", filemode="a+",
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 class IssueCollector:
