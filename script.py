@@ -14,12 +14,17 @@ import string
 from sklearn.naive_bayes import GaussianNB
 import numpy
 
+parser = argparse.ArgumentParser(description='Simple processing script')
+parser.add_argument('-inputfile', type=str, help='Input file')
+
+args = parser.parse_args()
+
 logging.basicConfig(level=logging.INFO, filename="script_log", filemode="a+",
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 random.seed(12312)
 
-inp = map(json.loads, open("output", "r").readlines())
+inp = map(json.loads, open(args.inputfile, "r").readlines())
 random.shuffle(inp)
 
 learn = inp[:len(inp)-200]
