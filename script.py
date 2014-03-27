@@ -13,6 +13,7 @@ from collections import defaultdict
 import string
 from sklearn.naive_bayes import GaussianNB
 import numpy
+import argparse
 
 parser = argparse.ArgumentParser(description='Simple processing script')
 parser.add_argument('-inputfile', type=str, help='Input file')
@@ -35,20 +36,6 @@ class Processor:
             "feature" : "enhancement",
             "bug" : "bug",
             "question" : "question"}
-
-    def __init__(self, inp):
-        words = defaultdict(int)
-        for obj in inp:
-            try:
-                for elem in map(lambda w: w.strip(), obj["body"].split()):
-                    words[elem] += 1
-            except Exception as ex:
-                print "Exception"
-        self.chosen = set()
-        for key, value in words.items():
-            if value > 20:
-                self.chosen.add(key)
-        print self.chosen
 
     def process_text(self, text):
         text = re.sub("[^" + string.printable + "]", "", text)
@@ -85,18 +72,6 @@ class Processor:
                     features["title." + word] += 1
         return [(features, label, obj) for label in labels]
 
-    def process(self, obj):
-        words = defaultdict(int)
-        try:
-            for elem in map(lambda w: w.strip(), obj["body"].split()):
-                words[elem] += 1
-        except Exception as ex:
-            print "Exception"
-        result = {}
-        for word in self.chosen:
-            result[word] = words[word]
-        return result
-
 def pr(L):
     for (features, result, obj) in L:
         print result
@@ -113,13 +88,23 @@ class Compresser:
     def learn(self, L):
         words = defaultdict(int)
         self.targets = {}
+        self.key_words = defaultdict(lambda: defaultdict(int))
+        counts = defaultdict(int)
         for (features, result, obj) in L:
             for key, value in features.items():
                 words[key] += 1
             if result not in self.targets:
                 self.targets[result] = len(self.targets)
+            for key, value in features.items():
+                self.key_words[result][key] += 1
+            counts[result] += 1
         occur = [(count, word) for (word, count) in words.items()]
         self.choices = [word for (count, word) in sorted(occur)[-self.CHOSEN:]]
+        for key, value in self.key_words.items():
+            for key2, value2 in value.items():
+                print "%s.%s" % (key2, key), value2 * 1.0 / counts[key]
+        pprint.pprint(self.key_words)
+        print self.choices
 
     def compress(self, L):
         compressed = []
@@ -130,14 +115,14 @@ class Compresser:
             compressed.append((numpy.array(new_features), self.targets[result], obj))
         return compressed
 
-p = Processor(learn)
+p = Processor()
 
 procinp = sum(map(p.process_obj, learn), [])
-pr(procinp)
+#pr(procinp)
 comp = Compresser()
 comp.learn(procinp)
 compressedinp = comp.compress(procinp)
-pr_compressed(compressedinp)
+#pr_compressed(compressedinp)
 
 f, t, m = zip(*compressedinp)
 
