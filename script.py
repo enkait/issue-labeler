@@ -18,24 +18,17 @@ import argparse
 parser = argparse.ArgumentParser(description='Simple processing script')
 parser.add_argument('-inputfile', type=str, help='Input file')
 
-args = parser.parse_args()
-
 logging.basicConfig(level=logging.INFO, filename="script_log", filemode="a+",
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 random.seed(12312)
-
-inp = map(json.loads, open(args.inputfile, "r").readlines())
-random.shuffle(inp)
-
-learn = inp[:len(inp)-200]
-test = inp[len(inp)-200:]
 
 class Processor:
     LABELS = {"enhancement" : "enhancement",
             "feature" : "enhancement",
             "bug" : "bug",
             "question" : "question"}
+    MAX_WORD_LEN = 10
 
     def process_text(self, text):
         text = re.sub("[^" + string.printable + "]", "", text)
@@ -45,6 +38,23 @@ class Processor:
 
     def process_word(self, word):
         return word.strip()
+
+    def make_features(self, pref, text, features):
+        wordlist = map(self.process_word, text.split())
+        for i in range(len(wordlist)):
+            word = ""
+            for j in range(i, len(wordlist)):
+                if len(wordlist[j]) <= 2:
+                    continue
+                word += wordlist[j]
+                if wordlist[j] not in ["not"]:
+                    break
+            i = j + 1
+            if word:
+                #word = word[:self.MAX_WORD_LEN]
+                features[pref + "." + word] += 1
+        #for ind in range(len(wordlist)-1):
+        #    features[pref + "." + wordlist[ind] + "->" + wordlist[ind+1]] += 1
 
     def process_obj(self, obj):
         features = defaultdict(int)
@@ -58,20 +68,18 @@ class Processor:
             return []
         if obj["body"]:
             obj["body"] = self.process_text(obj["body"])
-            for word in obj["body"].split():
-                word = self.process_word(word)
-                if (len(word) <= 2):
-                    continue
-                if word:
-                    features["body." + word] += 1
+            self.make_features("body", obj["body"], features)
         if obj["title"]:
             obj["title"] = self.process_text(obj["title"])
-            for word in obj["title"].split():
-                word = self.process_word(word)
-                if (len(word) <= 2):
-                    continue
-                if word:
-                    features["title." + word] += 1
+            self.make_features("title", obj["title"], features)
+        """
+        result = []
+        for label in labels:
+            nfeatures = dict(features)
+            nfeatures["ans:" + label] = 1
+            result.append((nfeatures, label, obj)) #SANITY CHECK
+        return result
+        """
         return [(features, label, obj) for label in labels]
 
 def pr(L):
@@ -87,7 +95,7 @@ def pr_compressed(L):
 
 class HashCompressor:
     CHOSEN = 2000
-    def learn(self, L):
+    def __init__(self):
         self.words = defaultdict(set)
         self.targets = {}
 
@@ -105,8 +113,6 @@ class HashCompressor:
                 new_features[enc] += value * 1.0 * sign
                 self.words[enc].add(key)
             compressed.append((numpy.array(new_features), self.targets[result], obj))
-        for key, value in self.words.items():
-            print key, value
         return compressed
 
 class Compressor:
@@ -141,44 +147,69 @@ class Compressor:
             compressed.append((numpy.array(new_features), self.targets[result], obj))
         return compressed
 
-p = Processor()
+def feed(gnb, objs):
+    f, t, m = zip(*objs)
+    gnb.partial_fit(f, t, [0, 1, 2], 1)
 
-procinp = sum(map(p.process_obj, learn), [])
-#pr(procinp)
-comp = HashCompressor()
-comp.learn(procinp)
-compressedinp = comp.compress(procinp)
-#pr_compressed(compressedinp)
+def main():
+    args = parser.parse_args()
 
-f, t, m = zip(*compressedinp)
+    test_objs = []
+    p = Processor()
+    comp = HashCompressor()
+    gnb = MultinomialNB()
 
-#scaler = preprocessing.StandardScaler()
-#f = scaler.fit_transform(f)
+    with open(args.inputfile, "r") as inp:
+        todo_objs = []
+        while True:
+            line = inp.readline()
+            if not line:
+                feed(gnb, todo_objs)
+                break
+            obj = json.loads(inp.readline().strip())
+            proc_objs = p.process_obj(obj)
+            comp_objs = comp.compress(proc_objs)
 
-#gnb = GaussianNB()
-gnb = MultinomialNB()
-gnb.fit(f, t)
+            if random.random() < 0.1:
+                test_objs += comp_objs
+            else:
+                todo_objs += comp_objs
 
-proctest = sum(map(p.process_obj, test), [])
-compressedtest = comp.compress(proctest)
-ft, tt, mt = zip(*compressedtest)
-#ft = scaler.fit_transform(ft)
-tt = numpy.array(tt)
+            if len(todo_objs) >= 1000:
+                feed(gnb, todo_objs)
+                todo_objs = []
 
-testres = gnb.predict(ft)
-testprobs = gnb.predict_proba(ft)
+    for key, value in comp.words.items():
+        print key, value
 
-for ind, (a, b) in enumerate(zip(testres, tt)):
-    print "+++++++++++++++++++++++++++++++++++++++++++++++"
-    print "Should be:", b, ", but was", a
-    print "title:", mt[ind]["title"]
-    print "body:", mt[ind]["body"]
-    print "labels:", [o["name"] for o in mt[ind]["labels"]]
-    print "url:", mt[ind]["url"]
-    print "html url:", mt[ind]["html_url"]
-    print "+++++++++++++++++++++++++++++++++++++++++++++++"
+    ft, tt, mt = zip(*test_objs)
+    tt = numpy.array(tt)
 
-print numpy.bincount(tt)
-print testres
-print tt
-print sum(testres == tt)
+    testres = gnb.predict(ft)
+    testprobs = gnb.predict_proba(ft)
+
+    for ind, (a, b) in enumerate(zip(testres, tt)):
+        print "+++++++++++++++++++++++++++++++++++++++++++++++"
+        print "Should be:", b, ", but was", a
+        print "title:", mt[ind]["title"]
+        print "body:", mt[ind]["body"]
+        print "labels:", [o["name"] for o in mt[ind]["labels"]]
+        print "url:", mt[ind]["url"]
+        print "html url:", mt[ind]["html_url"]
+        print "+++++++++++++++++++++++++++++++++++++++++++++++"
+
+    for clsname, clsid in comp.targets.items():
+        for ind, value in enumerate(gnb.feature_log_prob_[clsid]):
+            print "%s[%s]=%s" % (clsname, ind, value)
+
+
+    print numpy.bincount(tt)
+    print testres
+    print tt
+    print "All:", sum(testres == tt)
+    a = sum([1 if testres[i] == tt[i] and (tt[i] == comp.targets["bug"] or tt[i] == comp.targets["enhancement"]) else 0 for i in range(len(testres))])
+    b = sum([1 if tt[i] == comp.targets["bug"] or tt[i] == comp.targets["enhancement"] else 0 for i in range(len(testres))])
+    print "Bugs vs enhancements:", a, "/", b
+
+if __name__ == "__main__":
+    main()
