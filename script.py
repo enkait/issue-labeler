@@ -14,9 +14,14 @@ import string
 from sklearn.naive_bayes import GaussianNB, MultinomialNB
 import numpy
 import argparse
+import pickle
 
 parser = argparse.ArgumentParser(description='Simple processing script')
-parser.add_argument('-inputfile', type=str, help='Input file')
+parser.add_argument('-data_file', type=str, help='Input file')
+parser.add_argument('-num_bench', type=int, default=5, help='Number of benchmarks')
+parser.add_argument('-selected', type=int, default=2000, help='Selected by hash compressor')
+parser.add_argument('-model_file', type=str, help='File to read/write model to')
+parser.add_argument('-generate', dest='generate', action='store_true', help='Should the model be generated')
 
 logging.basicConfig(level=logging.INFO, filename="script_log", filemode="a+",
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -51,6 +56,16 @@ class Processor:
                     break
             i = j + 1
             if word:
+                if word.endswith("ing"):
+                    word = word[:-3]
+                elif word.endswith("ful"):
+                    word = word[:-3]
+                elif word.endswith("es"):
+                    word = word[:-2]
+                elif word.endswith("ed"):
+                    word = word[:-2]
+                elif word.endswith("s"):
+                    word = word[:-1]
                 #word = word[:self.MAX_WORD_LEN]
                 features[pref + "." + word] += 1
         #for ind in range(len(wordlist)-1):
@@ -94,22 +109,22 @@ def pr_compressed(L):
         print result, obj["url"], features
 
 class HashCompressor:
-    CHOSEN = 2000
-    def __init__(self):
+    def __init__(self, chosen):
         self.words = defaultdict(set)
         self.targets = {}
+        self.chosen = chosen
 
     def compress(self, L):
         compressed = []
         for (features, result, obj) in L:
             if result not in self.targets:
                 self.targets[result] = len(self.targets)
-            new_features = [0 for i in range(self.CHOSEN)]
+            new_features = [0 for i in range(self.chosen)]
             for key, value in features.items():
-                enc = hash(key) % (2 * self.CHOSEN)
-                #sign = -1 if enc < self.CHOSEN else 1
+                enc = hash(key) % (2 * self.chosen)
+                #sign = -1 if enc < self.chosen else 1
                 sign = 1 # CAREEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEe
-                enc %= self.CHOSEN
+                enc %= self.chosen
                 new_features[enc] += value * 1.0 * sign
                 self.words[enc].add(key)
             compressed.append((numpy.array(new_features), self.targets[result], obj))
@@ -147,69 +162,99 @@ class Compressor:
             compressed.append((numpy.array(new_features), self.targets[result], obj))
         return compressed
 
-def feed(gnb, objs):
+def feed(gnbs, objs):
     f, t, m = zip(*objs)
-    gnb.partial_fit(f, t, [0, 1, 2], 1)
+    counts = numpy.array([0 for i in range(len(gnbs))])
+    for ind, gnb in enumerate(gnbs):
+        if random.random() < 1. * (ind+1) / len(gnbs):
+            counts[ind] += len(f)
+            gnb.partial_fit(f, t, [0, 1, 2], 1)
+    return counts
 
 def main():
     args = parser.parse_args()
 
-    test_objs = []
-    p = Processor()
-    comp = HashCompressor()
-    gnb = MultinomialNB()
+    if args.generate:
+        if not args.model_file:
+            print "No file to store model in"
+            return
 
-    with open(args.inputfile, "r") as inp:
-        todo_objs = []
-        while True:
-            line = inp.readline()
-            if not line:
-                feed(gnb, todo_objs)
-                break
-            obj = json.loads(inp.readline().strip())
-            proc_objs = p.process_obj(obj)
-            comp_objs = comp.compress(proc_objs)
+        test_objs = []
+        processor = Processor()
+        comp = HashCompressor(args.selected)
+        gnbs = [MultinomialNB() for i in range(args.num_bench)]
+        counts = numpy.array([0 for i in range(args.num_bench)])
+        total = 0
 
-            if random.random() < 0.1:
-                test_objs += comp_objs
-            else:
-                todo_objs += comp_objs
+        with open(args.data_file, "r") as inp:
+            todo_objs = []
+            while True:
+                line = inp.readline()
+                if not line:
+                    counts += feed(gnbs, todo_objs)
+                    break
+                obj = json.loads(line.strip())
+                proc_objs = processor.process_obj(obj)
+                comp_objs = comp.compress(proc_objs)
+                total += len(comp_objs)
 
-            if len(todo_objs) >= 1000:
-                feed(gnb, todo_objs)
-                todo_objs = []
+                if random.random() < 0.1:
+                    test_objs += comp_objs
+                else:
+                    todo_objs += comp_objs
 
-    for key, value in comp.words.items():
-        print key, value
+                if len(todo_objs) >= 500:
+                    counts += feed(gnbs, todo_objs)
+                    todo_objs = []
 
-    ft, tt, mt = zip(*test_objs)
-    tt = numpy.array(tt)
+        for key, value in comp.words.items():
+            print key, value
 
-    testres = gnb.predict(ft)
-    testprobs = gnb.predict_proba(ft)
+        ft, tt, mt = zip(*test_objs)
+        tt = numpy.array(tt)
 
-    for ind, (a, b) in enumerate(zip(testres, tt)):
-        print "+++++++++++++++++++++++++++++++++++++++++++++++"
-        print "Should be:", b, ", but was", a
-        print "title:", mt[ind]["title"]
-        print "body:", mt[ind]["body"]
-        print "labels:", [o["name"] for o in mt[ind]["labels"]]
-        print "url:", mt[ind]["url"]
-        print "html url:", mt[ind]["html_url"]
-        print "+++++++++++++++++++++++++++++++++++++++++++++++"
+        for ind, (gnb, count) in enumerate(zip(gnbs, counts)):
+            testres = gnb.predict(ft)
+            testprobs = gnb.predict_proba(ft)
+            print "---------------------------------------------"
+            print "Test data bin counts: ", numpy.bincount(tt)
+            print "for %d learning examples" % (count,)
+            print "results: %d/%d correct" % (sum(testres == tt),len(tt))
+            print "---------------------------------------------"
 
-    for clsname, clsid in comp.targets.items():
-        for ind, value in enumerate(gnb.feature_log_prob_[clsid]):
-            print "%s[%s]=%s" % (clsname, ind, value)
+        gnb = gnbs[-1]
+        testres = gnb.predict(ft)
 
+        for ind, (a, b) in enumerate(zip(testres, tt)):
+            print "+++++++++++++++++++++++++++++++++++++++++++++++"
+            print "Should be:", b, ", but was", a
+            print "title:", mt[ind]["title"]
+            print "body:", mt[ind]["body"]
+            for ftkey, ftval in enumerate(ft[ind]):
+                if ftval > 0:
+                    print "(%s,%s):" % (ftkey, ftval)
+                    for clsname, clsid in comp.targets.items():
+                        log_prob = gnb.feature_log_prob_[clsid][ftkey]
+                        print "        %s[%s]=%s" % (clsname, ftkey, log_prob)
+            print "labels:", [o["name"] for o in mt[ind]["labels"]]
+            print "url:", mt[ind]["url"]
+            print "html url:", mt[ind]["html_url"]
+            print "+++++++++++++++++++++++++++++++++++++++++++++++"
 
-    print numpy.bincount(tt)
-    print testres
-    print tt
-    print "All:", sum(testres == tt)
-    a = sum([1 if testres[i] == tt[i] and (tt[i] == comp.targets["bug"] or tt[i] == comp.targets["enhancement"]) else 0 for i in range(len(testres))])
-    b = sum([1 if tt[i] == comp.targets["bug"] or tt[i] == comp.targets["enhancement"] else 0 for i in range(len(testres))])
-    print "Bugs vs enhancements:", a, "/", b
+        for clsname, clsid in comp.targets.items():
+            for ind, value in enumerate(gnb.feature_log_prob_[clsid]):
+                print "%s[%s]=%s" % (clsname, ind, value)
+
+        with open(args.model_file, "w") as model_file:
+            pickle.dump(processor, model_file)
+            pickle.dump(comp, model_file)
+            pickle.dump(gnb, model_file)
+
+    else:
+        with open(args.model_file, "r") as model_file:
+            processor = pickle.load(model_file)
+            comp = pickle.load(model_file)
+            gnb = pickle.load(model_file)
 
 if __name__ == "__main__":
     main()
