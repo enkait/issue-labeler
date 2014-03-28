@@ -54,6 +54,7 @@ class IssueCollector:
     def find_all(self, repo):
         logging.info("Getting issues for: %s" % (repo.full_name))
         if not repo.has_issues:
+            logging.info("Repo %s has no issues" % (repo.full_name))
             return
         for label in repo.get_labels():
             if label.name in self.LABELS:
