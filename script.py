@@ -210,12 +210,14 @@ def main():
             pickle.dump(processor, model_file)
             pickle.dump(comp, model_file)
             pickle.dump(gnbs, model_file)
+            pickle.dump(counts, model_file)
 
     else:
         with open(args.model_file, "r") as model_file:
             processor = pickle.load(model_file)
             comp = pickle.load(model_file)
             gnbs = pickle.load(model_file)
+            counts = pickle.load(model_file)
             gnb = gnbs[-1]
 
     if args.test_file:
@@ -230,7 +232,7 @@ def main():
                 comp_objs = comp.compress(proc_objs)
                 test_objs += comp_objs
 
-        print "Number of test objects:", test_objs
+        print "Number of test objects:", len(test_objs)
 
         for key, value in comp.words.items():
             print key, value
