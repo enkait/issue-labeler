@@ -24,6 +24,7 @@ parser.add_argument('-num_bench', type=int, default=5, help='Number of benchmark
 parser.add_argument('-selected', type=int, default=2000, help='Selected by hash compressor')
 parser.add_argument('-model_file', type=str, help='File to read/write model to')
 parser.add_argument('-generate', dest='generate', action='store_true', help='Should the model be generated')
+parser.add_argument('-verbose', dest='verbose', action='store_true', help='Should we output compression details and model')
 
 logging.basicConfig(level=logging.INFO, filename="script_log", filemode="a+",
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -234,11 +235,12 @@ def main():
 
         print "Number of test objects:", len(test_objs)
 
-        for key, value in comp.words.items():
-            print key, value
-
         ft, tt, mt = zip(*test_objs)
         tt = numpy.array(tt)
+
+        if args.verbose:
+            for key, value in comp.words.items():
+                print key, value
 
         for ind, (gnb, count) in enumerate(zip(gnbs, counts)):
             testres = gnb.predict(ft)
@@ -267,9 +269,10 @@ def main():
             print "html url:", mt[ind]["html_url"]
             print "+++++++++++++++++++++++++++++++++++++++++++++++"
 
-        for clsname, clsid in comp.targets.items():
-            for ind, value in enumerate(gnb.feature_log_prob_[clsid]):
-                print "%s[%s]=%s" % (clsname, ind, value)
+        if args.verbose:
+            for clsname, clsid in comp.targets.items():
+                for ind, value in enumerate(gnb.feature_log_prob_[clsid]):
+                    print "%s[%s]=%s" % (clsname, ind, value)
 
 
 if __name__ == "__main__":
