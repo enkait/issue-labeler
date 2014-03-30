@@ -15,9 +15,11 @@ from sklearn.naive_bayes import GaussianNB, MultinomialNB
 import numpy
 import argparse
 import pickle
+import os
 
 parser = argparse.ArgumentParser(description='Simple processing script')
 parser.add_argument('-data_file', type=str, help='Input file')
+parser.add_argument('-test_file', type=str, help='Test file')
 parser.add_argument('-num_bench', type=int, default=5, help='Number of benchmarks')
 parser.add_argument('-selected', type=int, default=2000, help='Selected by hash compressor')
 parser.add_argument('-model_file', type=str, help='File to read/write model to')
@@ -26,7 +28,8 @@ parser.add_argument('-generate', dest='generate', action='store_true', help='Sho
 logging.basicConfig(level=logging.INFO, filename="script_log", filemode="a+",
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
-random.seed(12312)
+#random.seed(12312)
+random.seed(6355)
 
 class Processor:
     LABELS = {"enhancement" : "enhancement",
@@ -177,14 +180,15 @@ def main():
     if args.generate:
         if not args.model_file:
             print "No file to store model in"
-            return
+            exit(1)
+        if os.path.exists(args.model_file):
+            print "Model file path exists"
+            exit(1)
 
-        test_objs = []
         processor = Processor()
         comp = HashCompressor(args.selected)
         gnbs = [MultinomialNB() for i in range(args.num_bench)]
         counts = numpy.array([0 for i in range(args.num_bench)])
-        total = 0
 
         with open(args.data_file, "r") as inp:
             todo_objs = []
@@ -196,16 +200,37 @@ def main():
                 obj = json.loads(line.strip())
                 proc_objs = processor.process_obj(obj)
                 comp_objs = comp.compress(proc_objs)
-                total += len(comp_objs)
-
-                if random.random() < 0.1:
-                    test_objs += comp_objs
-                else:
-                    todo_objs += comp_objs
+                todo_objs += comp_objs
 
                 if len(todo_objs) >= 500:
                     counts += feed(gnbs, todo_objs)
                     todo_objs = []
+
+        with open(args.model_file, "w") as model_file:
+            pickle.dump(processor, model_file)
+            pickle.dump(comp, model_file)
+            pickle.dump(gnbs, model_file)
+
+    else:
+        with open(args.model_file, "r") as model_file:
+            processor = pickle.load(model_file)
+            comp = pickle.load(model_file)
+            gnbs = pickle.load(model_file)
+            gnb = gnbs[-1]
+
+    if args.test_file:
+        test_objs = []
+        with open(args.test_file, "r") as inp:
+            while True:
+                line = inp.readline()
+                if not line:
+                    break
+                obj = json.loads(line.strip())
+                proc_objs = processor.process_obj(obj)
+                comp_objs = comp.compress(proc_objs)
+                test_objs += comp_objs
+
+        print "Number of test objects:", test_objs
 
         for key, value in comp.words.items():
             print key, value
@@ -222,7 +247,6 @@ def main():
             print "results: %d/%d correct" % (sum(testres == tt),len(tt))
             print "---------------------------------------------"
 
-        gnb = gnbs[-1]
         testres = gnb.predict(ft)
 
         for ind, (a, b) in enumerate(zip(testres, tt)):
@@ -245,16 +269,6 @@ def main():
             for ind, value in enumerate(gnb.feature_log_prob_[clsid]):
                 print "%s[%s]=%s" % (clsname, ind, value)
 
-        with open(args.model_file, "w") as model_file:
-            pickle.dump(processor, model_file)
-            pickle.dump(comp, model_file)
-            pickle.dump(gnb, model_file)
-
-    else:
-        with open(args.model_file, "r") as model_file:
-            processor = pickle.load(model_file)
-            comp = pickle.load(model_file)
-            gnb = pickle.load(model_file)
 
 if __name__ == "__main__":
     main()
