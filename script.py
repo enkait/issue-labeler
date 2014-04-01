@@ -41,7 +41,7 @@ class Processor:
     MAX_WORD_LEN = 10
 
     def process_text(self, text):
-        text = re.sub("[^" + string.printable + "]", "", text)
+        #text = re.sub("[^" + string.printable + "]", "", text)
         text = re.sub("[^" + string.ascii_letters + "?']", " ", text)
         text = text.lower()
         text = " ".join(text.split()) #convert multiple whitespaces to single whitespace
@@ -184,8 +184,9 @@ def format_one_result(good, total):
 def format_results(expected, received, targets):
     result = "results: %s correct\n" % (format_one_result(sum(expected == received), len(expected)),)
     for target_name, target_id in targets.items():
-        result += "    for %s: %s\n" % (target_name, format_one_result(
-            sum((received == target_id) * (received == expected)), sum(expected == target_id)))
+        result += "    for %s: precision: %s, recall: %s\n" % (target_name,
+                format_one_result(sum((received == target_id) * (received == expected)), sum(received == target_id)),
+                format_one_result(sum((received == target_id) * (received == expected)), sum(expected == target_id)))
     return result
 
 def main():
