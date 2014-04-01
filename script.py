@@ -16,6 +16,7 @@ import numpy
 import argparse
 import pickle
 import os
+import enchant
 
 parser = argparse.ArgumentParser(description='Simple processing script')
 parser.add_argument('-data_file', type=str, help='Input file')
@@ -40,6 +41,9 @@ class Processor:
             "question" : "question"}
     MAX_WORD_LEN = 10
 
+    def __init__(self):
+        self.e = enchant.Dict("en_EN")
+
     def process_text(self, text):
         #text = re.sub("[^" + string.printable + "]", "", text)
         text = re.sub("[^" + string.ascii_letters + "?']", " ", text)
@@ -47,6 +51,7 @@ class Processor:
         text = " ".join(text.split()) #convert multiple whitespaces to single whitespace
         text = self.process_negatives(text)
         text = self.question_mark(text)
+        text = self.spell_check(text)
         return text
 
     def process_word(self, word):
@@ -63,6 +68,14 @@ class Processor:
             else:
                 processedlist.append(wordlist[ind])
                 ind += 1
+        return " ".join(processedlist)
+
+    def spell_check(self, text):
+        wordlist = text.split()
+        processedlist = []
+        for word in wordlist:
+            if self.e.check(word):
+                processedlist.append(word)
         return " ".join(processedlist)
 
     def question_mark(self, text):
