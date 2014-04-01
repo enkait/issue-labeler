@@ -46,6 +46,7 @@ class Processor:
         text = text.lower()
         text = " ".join(text.split()) #convert multiple whitespaces to single whitespace
         text = self.process_negatives(text)
+        text = self.question_mark(text)
         return text
 
     def process_word(self, word):
@@ -63,6 +64,12 @@ class Processor:
                 processedlist.append(wordlist[ind])
                 ind += 1
         return " ".join(processedlist)
+
+    def question_mark(self, text):
+        if "?" in text:
+            text = re.sub("[^" + string.ascii_letters + "']", " ", text)
+            text += " ?"
+        return text
 
     def make_features(self, pref, text, features):
         wordlist = map(self.process_word, text.split())
