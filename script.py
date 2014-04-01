@@ -42,27 +42,32 @@ class Processor:
 
     def process_text(self, text):
         text = re.sub("[^" + string.printable + "]", "", text)
-        text = re.sub("[^" + string.ascii_letters + "]", " ", text)
+        text = re.sub("[^" + string.ascii_letters + "?']", " ", text)
         text = text.lower()
+        text = " ".join(text.split()) #convert multiple whitespaces to single whitespace
+        text = self.process_negatives(text)
         return text
 
     def process_word(self, word):
         return word.strip()
 
+    def process_negatives(self, text):
+        wordlist = text.split()
+        processedlist = []
+        ind = 0
+        while ind < len(wordlist):
+            if wordlist[ind] in ["not", "no"] and ind + 1 < len(wordlist):
+                processedlist.append(wordlist[ind] + wordlist[ind+1])
+                ind += 2
+            else:
+                processedlist.append(wordlist[ind])
+                ind += 1
+        return " ".join(processedlist)
+
     def make_features(self, pref, text, features):
         wordlist = map(self.process_word, text.split())
-        for i in range(len(wordlist)):
-            word = ""
-            for j in range(i, len(wordlist)):
-                if len(wordlist[j]) <= 2:
-                    continue
-                word += wordlist[j]
-                if wordlist[j] not in ["not"]:
-                    break
-            i = j + 1
-            if word:
-                #word = word[:self.MAX_WORD_LEN]
-                features[pref + "." + word] += 1
+        for word in wordlist:
+            features[pref + "." + word] += 1
         #for ind in range(len(wordlist)-1):
         #    features[pref + "." + wordlist[ind] + "->" + wordlist[ind+1]] += 1
 
