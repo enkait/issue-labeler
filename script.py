@@ -25,6 +25,7 @@ parser.add_argument('-selected', type=int, default=2000, help='Selected by hash 
 parser.add_argument('-model_file', type=str, help='File to read/write model to')
 parser.add_argument('-generate', dest='generate', action='store_true', help='Should the model be generated')
 parser.add_argument('-verbose', dest='verbose', action='store_true', help='Should we output compression details and model')
+parser.add_argument('-data_limit', type=int, default=None, help='Number of issues to use for training')
 
 logging.basicConfig(level=logging.INFO, filename="script_log", filemode="a+",
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -60,16 +61,6 @@ class Processor:
                     break
             i = j + 1
             if word:
-                if word.endswith("ing"):
-                    word = word[:-3]
-                elif word.endswith("ful"):
-                    word = word[:-3]
-                elif word.endswith("es"):
-                    word = word[:-2]
-                elif word.endswith("ed"):
-                    word = word[:-2]
-                elif word.endswith("s"):
-                    word = word[:-1]
                 #word = word[:self.MAX_WORD_LEN]
                 features[pref + "." + word] += 1
         #for ind in range(len(wordlist)-1):
@@ -175,6 +166,16 @@ def feed(gnbs, objs):
             gnb.partial_fit(f, t, [0, 1, 2], 1)
     return counts
 
+def format_one_result(good, total):
+    return "%s/%s = (%s)" % (good, total, good * 1.0 / total)
+
+def format_results(expected, received, targets):
+    result = "results: %s correct\n" % (format_one_result(sum(expected == received), len(expected)),)
+    for target_name, target_id in targets.items():
+        result += "    for %s: %s\n" % (target_name, format_one_result(
+            sum((received == target_id) * (received == expected)), sum(expected == target_id)))
+    return result
+
 def main():
     args = parser.parse_args()
 
@@ -190,14 +191,16 @@ def main():
         comp = HashCompressor(args.selected)
         gnbs = [MultinomialNB() for i in range(args.num_bench)]
         counts = numpy.array([0 for i in range(args.num_bench)])
+        lines_read = 0
 
         with open(args.data_file, "r") as inp:
             todo_objs = []
             while True:
                 line = inp.readline()
-                if not line:
+                if not line or lines_read == args.data_limit:
                     counts += feed(gnbs, todo_objs)
                     break
+                lines_read += 1
                 obj = json.loads(line.strip())
                 proc_objs = processor.process_obj(obj)
                 comp_objs = comp.compress(proc_objs)
@@ -248,7 +251,7 @@ def main():
             print "---------------------------------------------"
             print "Test data bin counts: ", numpy.bincount(tt)
             print "for %d learning examples" % (count,)
-            print "results: %d/%d correct" % (sum(testres == tt),len(tt))
+            print format_results(tt, testres, comp.targets)
             print "---------------------------------------------"
 
         testres = gnb.predict(ft)
