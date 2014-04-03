@@ -4,6 +4,7 @@ import datetime
 import argparse
 import logging
 import json
+from github.GithubException import UnknownObjectException, GithubException
 from github_wrapper import GithubAPIWrapper, MockGithub
 from stores import MemoryStore, OverwriteStore, AppendStore
 
@@ -46,7 +47,17 @@ class IssueCollector:
         self.done = self.prev_done
 
         for repo in self.repo_source:
-            self.find_all(repo)
+            try:
+                self.find_all(repo)
+            except UnknownObjectException:
+                logging.exception("Unknown object exception received from GitHub API")
+                logging.warning("Skipping repository number: %s", self.done)
+            except GithubException as ex:
+                if ex.status != 410:
+                    raise
+                else:
+                    logging.exception("Exception received from GitHub API with code 410: gone")
+                    logging.warning("Skipping repository number: %s", self.done)
             self.done += 1
             self.save_queue()
 
