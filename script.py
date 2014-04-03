@@ -17,6 +17,7 @@ import argparse
 import pickle
 import os
 import enchant
+from stemming.porter2 import stem
 
 parser = argparse.ArgumentParser(description='Simple processing script')
 parser.add_argument('-data_file', type=str, help='Input file')
@@ -52,6 +53,7 @@ class Processor:
         text = self.process_negatives(text)
         text = self.question_mark(text)
         text = self.spell_check(text)
+        text = self.stemming(text)
         return text
 
     def process_word(self, word):
@@ -76,6 +78,13 @@ class Processor:
         for word in wordlist:
             if self.e.check(word):
                 processedlist.append(word)
+        return " ".join(processedlist)
+
+    def stemming(self, text):
+        wordlist = text.split()
+        processedlist = []
+        for word in wordlist:
+            processedlist.append(stem(word))
         return " ".join(processedlist)
 
     def question_mark(self, text):
@@ -273,7 +282,6 @@ def main():
 
         for ind, (gnb, count) in enumerate(zip(gnbs, counts)):
             testres = gnb.predict(ft)
-            testprobs = gnb.predict_proba(ft)
             print "---------------------------------------------"
             print "Test data bin counts: ", numpy.bincount(tt)
             print "for %d learning examples" % (count,)
