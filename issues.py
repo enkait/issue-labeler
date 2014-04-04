@@ -113,7 +113,6 @@ def main(argv):
     ic = IssueCollector(gh, AppendStore(relpath), OverwriteStore(queuename), get_repos(repo_filename, gh))
     if os.path.exists(queuename):
         ic.load_queue()
-    print "OMG"
     ic.execute_all()
 
 if __name__ == "__main__":
