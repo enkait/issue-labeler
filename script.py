@@ -43,6 +43,18 @@ class Processor:
     MAX_WORD_LEN = 10
 
     def __init__(self):
+        self.init()
+
+    def init(self):
+        self.e = enchant.Dict("en_EN")
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        del state['e'] #remove enchant from pickle
+        return state
+
+    def __setstate__(self, new_state):
+        self.__dict__ = new_state
         self.e = enchant.Dict("en_EN")
 
     def process_text(self, text):
@@ -53,7 +65,7 @@ class Processor:
         text = self.process_negatives(text)
         text = self.question_mark(text)
         text = self.spell_check(text)
-        text = self.stemming(text)
+        #text = self.stemming(text)
         return text
 
     def process_word(self, word):
@@ -78,6 +90,8 @@ class Processor:
         for word in wordlist:
             if self.e.check(word):
                 processedlist.append(word)
+            else:
+                processedlist.append("#")
         return " ".join(processedlist)
 
     def stemming(self, text):
@@ -93,10 +107,15 @@ class Processor:
             text += " ?"
         return text
 
+    LOOKAHEAD = 1
+
     def make_features(self, pref, text, features):
         wordlist = map(self.process_word, text.split())
         for word in wordlist:
             features[pref + "." + word] += 1
+        #for ind in range(len(wordlist)):
+        #    for delta in range(1, min(self.LOOKAHEAD, len(wordlist) - ind)):
+        #        features[pref + "." + wordlist[ind] + "->" + wordlist[ind + delta]] += 1
         #for ind in range(len(wordlist)-1):
         #    features[pref + "." + wordlist[ind] + "->" + wordlist[ind+1]] += 1
 
@@ -198,6 +217,7 @@ def feed(gnbs, objs):
         if random.random() < 1. * (ind+1) / len(gnbs):
             counts[ind] += len(f)
             gnb.partial_fit(f, t, [0, 1, 2], 1)
+    logging.info("fed %s objects, counts: %s", len(objs), counts)
     return counts
 
 def format_one_result(good, total):
@@ -221,6 +241,7 @@ def main():
         if os.path.exists(args.model_file):
             print "Model file path exists"
             exit(1)
+        logging.info("Generating models")
 
         processor = Processor()
         comp = HashCompressor(args.selected)
@@ -241,7 +262,7 @@ def main():
                 comp_objs = comp.compress(proc_objs)
                 todo_objs += comp_objs
 
-                if len(todo_objs) >= 500:
+                if len(todo_objs) >= 100:
                     counts += feed(gnbs, todo_objs)
                     todo_objs = []
 
@@ -252,14 +273,17 @@ def main():
             pickle.dump(counts, model_file)
 
     else:
+        logging.info("Loading models from file")
         with open(args.model_file, "r") as model_file:
             processor = pickle.load(model_file)
+            processor.init()
             comp = pickle.load(model_file)
             gnbs = pickle.load(model_file)
             counts = pickle.load(model_file)
             gnb = gnbs[-1]
 
     if args.test_file:
+        logging.info("Evaluating models on test data set")
         test_objs = []
         with open(args.test_file, "r") as inp:
             while True:
@@ -271,7 +295,7 @@ def main():
                 comp_objs = comp.compress(proc_objs)
                 test_objs += comp_objs
 
-        print "Number of test objects:", len(test_objs)
+        logging.info("Number of test objects: %s", len(test_objs))
 
         ft, tt, mt = zip(*test_objs)
         tt = numpy.array(tt)
