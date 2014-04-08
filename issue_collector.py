@@ -79,6 +79,8 @@ class IssueCollector:
         logging.info("Descending into: (%s, [%s, %s])" % (label, low, high))
         query_result = self.api.issues_by_date(label, low, high)
         total_count = query_result.totalCount
+        if total_count == 0:
+            return
         if total_count <= self.GITHUB_LIMIT:
             self.save_all(query_result)
             return
