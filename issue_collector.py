@@ -5,6 +5,7 @@ from dateutil import parser as datetime_parser
 import argparse
 import logging
 from github_wrapper import GithubAPIWrapper, MockGithub
+from github.GithubException import UnknownObjectException, GithubException
 from stores import MemoryStore, OverwriteStore, AppendStore
 
 parser = argparse.ArgumentParser(description='Download data for processing')
@@ -22,13 +23,22 @@ class IssueCollector:
     WAIT_SECS = 600
 
     def save_all(self, result, limit=None):
-        logging.info("Saving all %d results" % result.totalCount)
+        limit = limit or result.totalCount
+        logging.info("Saving at most %d results out of %d" % (limit, result.totalCount))
         count = 0
         for elem in result:
             if count == limit:
                 break
-            self.store.store(elem.raw_data)
+            try:
+                self.store.store(elem.raw_data)
+            except GithubException as ex:
+                if ex.status != 410:
+                    raise
+                else:
+                    logging.exception("Exception received from GitHub API"
+                            " with code 410: gone; skipping issue")
             count += 1
+        logging.info("Saved %d results" % count)
         return count
 
     def enqueue(self, obj):
@@ -77,6 +87,7 @@ class IssueCollector:
 
     def find_all(self, (label, low, high)):
         logging.info("Descending into: (%s, [%s, %s])" % (label, low, high))
+        self.log_diag()
         query_result = self.api.issues_by_date(label, low, high)
         total_count = query_result.totalCount
         if total_count == 0:
@@ -87,7 +98,7 @@ class IssueCollector:
         if total_count <= 2 * self.GITHUB_LIMIT:
             saved = self.save_all(query_result)
             query_result = self.api.issues_by_date(label, low, high)
-            self.save_all(query_result, limit=saved)
+            self.save_all(query_result, limit=(total_count-saved))
             return
         if low == high:
             logging.warn("Can not bisect further: for label (%s,"
@@ -96,7 +107,6 @@ class IssueCollector:
             return
         self.enqueue(self.gen_upper_bisect(label, low, high))
         self.enqueue(self.gen_lower_bisect(label, low, high))
-        self.log_diag()
 
     def __init__(self, api, store, queue_store):
         self.api = api
