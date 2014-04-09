@@ -10,7 +10,7 @@ class GithubAPIWrapper:
         self.g = Github(user, password)
 
     def get_rate_limit(self):
-        return self.g.get_rate_limit().rate.remaining
+        return self.g.rate_limiting
 
     def get_api_status(self):
         return self.g.get_api_status().status
