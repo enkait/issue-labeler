@@ -19,13 +19,14 @@ logging.basicConfig(level=logging.INFO, filename="collection/issues_log", filemo
 class IssueCollector:
     LABELS = ["enhancement", "bug", "feature", "question"]
     GITHUB_LIMIT = 1000
-    API_THRESHOLD = 10
     WAIT_SECS = 600
 
     def wait_api(self):
         # TODO: watch out for separate rate limit for search and other
-        remaining, limit = self.api.get_rate_limit()
-        while remaining < self.API_THRESHOLD:
+        while True:
+            remaining, limit = self.api.get_rate_limit()
+            if remaining > 0:
+                break
             logging.info("Remaining API calls: %s/%s - sleeping", remaining, limit)
             self.api.sleep(self.WAIT_SECS)
 
