@@ -22,6 +22,27 @@ class IssueCollector:
     API_THRESHOLD = 10
     WAIT_SECS = 600
 
+    def wait_api(self):
+        # TODO: watch out for separate rate limit for search and other
+        self.api.sleep(self.WAIT_SECS)
+
+    def save_element(self, elem):
+        while True:
+            try:
+                self.store.store(elem.raw_data)
+                return
+            except GithubException as ex:
+                if ex.status == 403:
+                    logging.exception("Exception received from GitHub API"
+                            " with code 403: forbidden; waiting %s seconds", self.WAIT_SECS)
+                    self.wait_api()
+                elif ex.status == 410:
+                    logging.exception("Exception received from GitHub API"
+                            " with code 410: gone; skipping issue")
+                    return
+                else:
+                    raise
+
     def save_all(self, result, limit=None):
         limit = limit or result.totalCount
         logging.info("Saving at most %d results out of %d" % (limit, result.totalCount))
@@ -29,14 +50,7 @@ class IssueCollector:
         for elem in result:
             if count == limit:
                 break
-            try:
-                self.store.store(elem.raw_data)
-            except GithubException as ex:
-                if ex.status != 410:
-                    raise
-                else:
-                    logging.exception("Exception received from GitHub API"
-                            " with code 410: gone; skipping issue")
+            self.save_element(elem)
             count += 1
         logging.info("Saved %d results" % count)
         return count
