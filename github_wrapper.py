@@ -18,8 +18,9 @@ class GithubAPIWrapper:
     def query_by_stars(self, low, high):
         return self.g.search_repositories("stars:%d..%d" % (low, high))
 
-    def issues_by_date(self, label, low, high):
-        return self.g.search_issues("created:%s..%s type:issue label:%s" % (low, high, label))
+    def issues_by_date(self, label, low, high, sort="created", order="asc"):
+        return self.g.search_issues("created:%s..%s type:issue label:%s"
+                " sort:%s order:%s" % (low, high, label, sort, order))
 
     def load_repo(self, raw):
         return self.g.create_from_raw_data(Repository, raw)

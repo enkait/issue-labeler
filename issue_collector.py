@@ -102,7 +102,7 @@ class IssueCollector:
     def find_all(self, (label, low, high)):
         logging.info("Descending into: (%s, [%s, %s])" % (label, low, high))
         self.log_diag()
-        query_result = self.api.issues_by_date(label, low, high)
+        query_result = self.api.issues_by_date(label, low, high, order="asc")
         total_count = query_result.totalCount
         if total_count == 0:
             return
@@ -111,7 +111,7 @@ class IssueCollector:
             return
         if total_count <= 2 * self.GITHUB_LIMIT:
             saved = self.save_all(query_result)
-            query_result = self.api.issues_by_date(label, low, high)
+            query_result = self.api.issues_by_date(label, low, high, order="desc")
             self.save_all(query_result, limit=(total_count-saved))
             return
         if low == high:
