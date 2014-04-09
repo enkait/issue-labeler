@@ -10,7 +10,8 @@ class GithubAPIWrapper:
         self.g = Github(user, password)
 
     def get_rate_limit(self):
-        return self.g.rate_limiting
+        rate = self.g.get_rate_limit()
+        return (rate.rate.remaining, rate.rate.limit)
 
     def get_api_status(self):
         return self.g.get_api_status().status
@@ -20,7 +21,7 @@ class GithubAPIWrapper:
 
     def issues_by_date(self, label, low, high, sort="created", order="asc"):
         return self.g.search_issues("created:%s..%s type:issue label:%s"
-                " sort:%s order:%s" % (low, high, label, sort, order))
+                % (low, high, label), sort, order)
 
     def load_repo(self, raw):
         return self.g.create_from_raw_data(Repository, raw)

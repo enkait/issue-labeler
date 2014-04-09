@@ -20,13 +20,13 @@ class IssueCollector:
     LABELS = ["enhancement", "bug", "feature", "question"]
     GITHUB_LIMIT = 1000
     API_THRESHOLD = 10
-    WAIT_SECS = 4000
+    WAIT_SECS = 600
 
     def wait_api(self):
         # TODO: watch out for separate rate limit for search and other
         remaining, limit = self.api.get_rate_limit()
-        if remaining < self.API_THRESHOLD:
-            logging.info("Sleeping")
+        while remaining < self.API_THRESHOLD:
+            logging.info("Remaining API calls: %s/%s - sleeping", remaining, limit)
             self.api.sleep(self.WAIT_SECS)
 
     def save_element(self, elem):
