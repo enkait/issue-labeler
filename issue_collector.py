@@ -40,6 +40,10 @@ class IssueCollector:
                     logging.exception("Exception received from GitHub API"
                             " with code 403: forbidden; waiting %s seconds", self.WAIT_SECS)
                     self.wait_api()
+                elif ex.status == 502:
+                    logging.exception("Exception received from GitHub API"
+                            " with code 502: server error; waiting %s seconds", self.WAIT_SECS)
+                    self.wait_api()
                 elif ex.status == 410:
                     logging.exception("Exception received from GitHub API"
                             " with code 410: gone; skipping issue")
