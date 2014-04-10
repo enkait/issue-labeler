@@ -28,6 +28,7 @@ parser.add_argument('-model_file', type=str, help='File to read/write model to')
 parser.add_argument('-generate', dest='generate', action='store_true', help='Should the model be generated')
 parser.add_argument('-verbose', dest='verbose', action='store_true', help='Should we output compression details and model')
 parser.add_argument('-data_limit', type=int, default=None, help='Number of issues to use for training')
+parser.add_argument('-test_limit', type=int, default=None, help='Number of issues to use for testing')
 
 logging.basicConfig(level=logging.INFO, filename="script_log", filemode="a+",
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -65,7 +66,7 @@ class Processor:
         text = self.process_negatives(text)
         text = self.question_mark(text)
         text = self.spell_check(text)
-        #text = self.stemming(text)
+        text = self.stemming(text)
         return text
 
     def process_word(self, word):
@@ -113,9 +114,9 @@ class Processor:
         wordlist = map(self.process_word, text.split())
         for word in wordlist:
             features[pref + "." + word] += 1
-        #for ind in range(len(wordlist)):
-        #    for delta in range(1, min(self.LOOKAHEAD, len(wordlist) - ind)):
-        #        features[pref + "." + wordlist[ind] + "->" + wordlist[ind + delta]] += 1
+        for ind in range(len(wordlist)):
+            for delta in range(1, min(self.LOOKAHEAD, len(wordlist) - ind)):
+                features[pref + "." + wordlist[ind] + "->" + wordlist[ind + delta]] += 1
         #for ind in range(len(wordlist)-1):
         #    features[pref + "." + wordlist[ind] + "->" + wordlist[ind+1]] += 1
 
@@ -220,16 +221,60 @@ def feed(gnbs, objs):
     logging.info("fed %s objects, counts: %s", len(objs), counts)
     return counts
 
-def format_one_result(good, total):
-    return "%s/%s = (%s)" % (good, total, good * 1.0 / total)
+class Tester:
+    def __init__(self, gnbs, counts, targets):
+        self.gnbs = gnbs
+        self.counts = counts
+        self.targets = targets
+        self.stats = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
 
-def format_results(expected, received, targets):
-    result = "results: %s correct\n" % (format_one_result(sum(expected == received), len(expected)),)
-    for target_name, target_id in targets.items():
-        result += "    for %s: precision: %s, recall: %s\n" % (target_name,
-                format_one_result(sum((received == target_id) * (received == expected)), sum(received == target_id)),
-                format_one_result(sum((received == target_id) * (received == expected)), sum(expected == target_id)))
-    return result
+    def feed(self, objs):
+        logging.info("Evaluating %s test objects", len(objs))
+
+        ft, expected, mt = zip(*objs)
+        expected = numpy.array(expected)
+
+        for ind, gnb in enumerate(self.gnbs):
+            received = gnb.predict(ft)
+            for target_name, target_id in self.targets.items():
+                self.stats[ind][target_name]["correct"] += sum((received == target_id) * (received == expected))
+                self.stats[ind][target_name]["retrieved"] += sum(received == target_id)
+                self.stats[ind][target_name]["received"] += sum(expected == target_id)
+            self.stats[ind]["all"]["correct"] += sum(received == expected)
+            self.stats[ind]["all"]["retrieved"] += len(received)
+            self.stats[ind]["all"]["received"] += len(received)
+
+        for ind, (a, b) in enumerate(zip(received, expected)):
+            print "+++++++++++++++++++++++++++++++++++++++++++++++"
+            print "Should be:", b, ", but was", a
+            print "title:", mt[ind]["title"]
+            print "body:", mt[ind]["body"]
+            for ftkey, ftval in enumerate(ft[ind]):
+                if ftval > 0:
+                    print "(%s,%s):" % (ftkey, ftval)
+                    for clsname, clsid in self.targets.items():
+                        log_prob = gnb.feature_log_prob_[clsid][ftkey]
+                        print "        %s[%s]=%s" % (clsname, ftkey, log_prob)
+            print "labels:", [o["name"] for o in mt[ind]["labels"]]
+            print "url:", mt[ind]["url"]
+            print "html url:", mt[ind]["html_url"]
+            print "+++++++++++++++++++++++++++++++++++++++++++++++"
+
+    def format_ratio(self, a, b):
+        return "%s/%s = (%s)" % (a, b, a * 1.0 / b)
+
+    def format_results(self, stats):
+        for target_name, details in stats.items():
+            print "    for %s: precision: %s, recall: %s" % (target_name,
+                    self.format_ratio(details["correct"], details["retrieved"]),
+                    self.format_ratio(details["correct"], details["received"]))
+
+    def print_stats(self):
+        for ind, (gnb, count) in enumerate(zip(self.gnbs, self.counts)):
+            print "---------------------------------------------"
+            print "For %d learning examples" % (count,)
+            self.format_results(self.stats[ind])
+            print "---------------------------------------------"
 
 def main():
     args = parser.parse_args()
@@ -284,57 +329,29 @@ def main():
 
     if args.test_file:
         logging.info("Evaluating models on test data set")
-        test_objs = []
+
+        tester = Tester(gnbs, counts, comp.targets)
+
+        lines_read = 0
+
         with open(args.test_file, "r") as inp:
+            test_objs = []
             while True:
                 line = inp.readline()
-                if not line:
+                if not line or lines_read == args.test_limit:
+                    tester.feed(test_objs)
                     break
+                lines_read += 1
                 obj = json.loads(line.strip())
                 proc_objs = processor.process_obj(obj)
                 comp_objs = comp.compress(proc_objs)
                 test_objs += comp_objs
 
-        logging.info("Number of test objects: %s", len(test_objs))
+                if len(test_objs) >= 100:
+                    tester.feed(test_objs)
+                    test_objs = []
 
-        ft, tt, mt = zip(*test_objs)
-        tt = numpy.array(tt)
-
-        if args.verbose:
-            for key, value in comp.words.items():
-                print key, value
-
-        for ind, (gnb, count) in enumerate(zip(gnbs, counts)):
-            testres = gnb.predict(ft)
-            print "---------------------------------------------"
-            print "Test data bin counts: ", numpy.bincount(tt)
-            print "for %d learning examples" % (count,)
-            print format_results(tt, testres, comp.targets)
-            print "---------------------------------------------"
-
-        testres = gnb.predict(ft)
-
-        for ind, (a, b) in enumerate(zip(testres, tt)):
-            print "+++++++++++++++++++++++++++++++++++++++++++++++"
-            print "Should be:", b, ", but was", a
-            print "title:", mt[ind]["title"]
-            print "body:", mt[ind]["body"]
-            for ftkey, ftval in enumerate(ft[ind]):
-                if ftval > 0:
-                    print "(%s,%s):" % (ftkey, ftval)
-                    for clsname, clsid in comp.targets.items():
-                        log_prob = gnb.feature_log_prob_[clsid][ftkey]
-                        print "        %s[%s]=%s" % (clsname, ftkey, log_prob)
-            print "labels:", [o["name"] for o in mt[ind]["labels"]]
-            print "url:", mt[ind]["url"]
-            print "html url:", mt[ind]["html_url"]
-            print "+++++++++++++++++++++++++++++++++++++++++++++++"
-
-        if args.verbose:
-            for clsname, clsid in comp.targets.items():
-                for ind, value in enumerate(gnb.feature_log_prob_[clsid]):
-                    print "%s[%s]=%s" % (clsname, ind, value)
-
+        tester.print_stats()
 
 if __name__ == "__main__":
     main()
