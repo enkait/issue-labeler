@@ -37,6 +37,11 @@ class IssueCollector:
                 return
             except GithubException as ex:
                 if ex.status == 403:
+                    if "block" in ex.data:
+                        logging.exception("Exception received from GitHub API"
+                                " with code 403: forbidden, but data contains 'block';"
+                                " skipping issue")
+                        return
                     logging.exception("Exception received from GitHub API"
                             " with code 403: forbidden; waiting %s seconds", self.WAIT_SECS)
                     self.wait_api()
