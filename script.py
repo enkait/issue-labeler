@@ -320,7 +320,7 @@ def main():
                 comp_objs = comp.compress(proc_objs)
                 todo_objs += comp_objs
 
-                if len(todo_objs) >= 100:
+                if len(todo_objs) >= 500:
                     counts += feed(gnbs, todo_objs)
                     todo_objs = []
 
@@ -360,7 +360,7 @@ def main():
                 comp_objs = comp.compress(proc_objs)
                 test_objs += comp_objs
 
-                if len(test_objs) >= 100:
+                if len(test_objs) >= 500:
                     tester.feed(test_objs)
                     test_objs = []
 
