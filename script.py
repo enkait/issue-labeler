@@ -29,12 +29,18 @@ parser.add_argument('-generate', dest='generate', action='store_true', help='Sho
 parser.add_argument('-verbose', dest='verbose', action='store_true', help='Should we output compression details and model')
 parser.add_argument('-data_limit', type=int, default=None, help='Number of issues to use for training')
 parser.add_argument('-test_limit', type=int, default=None, help='Number of issues to use for testing')
+parser.add_argument('-do_stemming', dest='do_stemming', action='store_true', help='Should stemming be used')
+parser.add_argument('-do_dictionary', dest='do_dictionary', action='store_true', help='Should dictionary be used')
 
 logging.basicConfig(level=logging.INFO, filename="script_log", filemode="a+",
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
-#random.seed(12312)
 random.seed(6355)
+
+class ProcessorConfiguration:
+    def __init__(self, do_dictionary=False, do_stemming=False):
+        self.do_dictionary = do_dictionary
+        self.do_stemming = do_stemming
 
 class Processor:
     LABELS = {"enhancement" : "enhancement",
@@ -43,8 +49,9 @@ class Processor:
             "question" : "question"}
     MAX_WORD_LEN = 10
 
-    def __init__(self):
+    def __init__(self, config):
         self.init()
+        self.config = config
 
     def init(self):
         self.e = enchant.Dict("en_EN")
@@ -65,8 +72,10 @@ class Processor:
         text = " ".join(text.split()) #convert multiple whitespaces to single whitespace
         text = self.process_negatives(text)
         text = self.question_mark(text)
-        text = self.spell_check(text)
-        text = self.stemming(text)
+        if self.config.do_dictionary:
+            text = self.spell_check(text)
+        if self.config.do_stemming:
+            text = self.stemming(text)
         return text
 
     def process_word(self, word):
@@ -114,9 +123,9 @@ class Processor:
         wordlist = map(self.process_word, text.split())
         for word in wordlist:
             features[pref + "." + word] += 1
-        for ind in range(len(wordlist)):
-            for delta in range(1, min(self.LOOKAHEAD, len(wordlist) - ind)):
-                features[pref + "." + wordlist[ind] + "->" + wordlist[ind + delta]] += 1
+        #for ind in range(len(wordlist)):
+        #    for delta in range(1, min(self.LOOKAHEAD, len(wordlist) - ind)):
+        #        features[pref + "." + wordlist[ind] + "->" + wordlist[ind + delta]] += 1
         #for ind in range(len(wordlist)-1):
         #    features[pref + "." + wordlist[ind] + "->" + wordlist[ind+1]] += 1
 
@@ -174,7 +183,8 @@ class HashCompressor:
                 #sign = -1 if enc < self.chosen else 1
                 sign = 1 # CAREEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEe
                 enc %= self.chosen
-                new_features[enc] += value * 1.0 * sign
+                #new_features[enc] += value * 1.0 * sign
+                new_features[enc] = 1. # ZERO or ONE
                 self.words[enc].add(key)
             compressed.append((numpy.array(new_features), self.targets[result], obj))
         return compressed
@@ -288,7 +298,10 @@ def main():
             exit(1)
         logging.info("Generating models")
 
-        processor = Processor()
+        processor_config = ProcessorConfiguration(do_dictionary=args.do_dictionary,
+                do_stemming=args.do_stemming)
+
+        processor = Processor(processor_config)
         comp = HashCompressor(args.selected)
         gnbs = [MultinomialNB() for i in range(args.num_bench)]
         counts = numpy.array([0 for i in range(args.num_bench)])
