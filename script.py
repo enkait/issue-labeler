@@ -133,7 +133,7 @@ class Processor:
         features = defaultdict(int)
         labels = set()
         for labelobj in obj["labels"]:
-            labelname = labelobj["name"]
+            labelname = labelobj["name"].lower()
             if labelname in self.LABELS:
                 labels.add(self.LABELS[labelname])
         if len(labels) == 0:
