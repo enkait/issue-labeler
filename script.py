@@ -72,16 +72,18 @@ class Processor:
         self.e = enchant.Dict("en_EN")
 
     def process_text(self, text):
-        #text = re.sub("[^" + string.printable + "]", "", text)
-        text = re.sub("[^" + string.ascii_letters + "?']", " ", text)
-        text = text.lower()
+        features = []
+        features += self.question_mark(text)
+        text = re.sub("[^" + string.ascii_letters + "']", " ", text)
         text = " ".join(text.split()) #convert multiple whitespaces to single whitespace
-        text = self.process_negatives(text)
-        text = self.question_mark(text)
+        #text = text.lower()
+        text = self.capitalize_text(text)
         if self.config.do_dictionary:
             text = self.spell_check(text)
         if self.config.do_stemming:
             text = self.stemming(text)
+        text = self.process_negatives(text)
+        features += text.split()
         return text
 
     def process_word(self, word):
@@ -117,18 +119,25 @@ class Processor:
             processedlist.append(stem(word))
         return " ".join(processedlist)
 
+    def capitalize_text(self, text):
+        words = []
+        for word in text.split():
+            if word == word.capitalize():
+                words.append(word)
+            else:
+                words.append(word.lower())
+        return " ".join(words)
+
     def question_mark(self, text):
         if "?" in text:
-            text = re.sub("[^" + string.ascii_letters + "']", " ", text)
-            text += " ?"
-        return text
+            return ["?"]
+        return []
 
     LOOKAHEAD = 1
 
-    def make_features(self, pref, text, features):
-        wordlist = map(self.process_word, text.split())
-        for word in wordlist:
-            features[pref + "." + word] += 1
+    def add_features(self, pref, feature_list, out_features):
+        for feature in feature_list:
+            out_features[pref + "." + feature] += 1
         #for ind in range(len(wordlist)):
         #    for delta in range(1, min(self.LOOKAHEAD, len(wordlist) - ind)):
         #        features[pref + "." + wordlist[ind] + "->" + wordlist[ind + delta]] += 1
@@ -146,11 +155,13 @@ class Processor:
             logging.warn("Zero labels found: %s", labels)
             return []
         if obj["body"]:
-            obj["body"] = self.process_text(obj["body"])
-            self.make_features("body", obj["body"], features)
+            obj["body"] = re.sub("[^" + string.printable + "']", " ", obj["body"])
+            feature_list = self.process_text(obj["body"])
+            self.add_features("body", feature_list, features)
         if obj["title"]:
-            obj["title"] = self.process_text(obj["title"])
-            self.make_features("title", obj["title"], features)
+            obj["title"] = re.sub("[^" + string.printable + "']", " ", obj["title"])
+            feature_list = self.process_text(obj["title"])
+            self.add_features("title", feature_list, features)
         """
         result = []
         for label in labels:
@@ -266,6 +277,7 @@ class Tester:
             print "title:", mt[ind]["title"]
             print "body:", mt[ind]["body"]
             for ftkey, ftval in enumerate(ft[ind]):
+                print "*******************************"
                 if ftval > 0:
                     print "(%s,%s):" % (ftkey, ftval)
                     for clsname, clsid in self.targets.items():
