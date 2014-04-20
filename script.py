@@ -11,13 +11,18 @@ import re
 import logging
 from collections import defaultdict
 import string
-from sklearn.naive_bayes import GaussianNB, MultinomialNB
+from sklearn.naive_bayes import GaussianNB, MultinomialNB, BernoulliNB
 import numpy
 import argparse
 import pickle
 import os
 import enchant
 from stemming.porter2 import stem
+
+model_map = {
+    'BernoulliNB': BernoulliNB,
+    'MultinomialNB': MultinomialNB,
+}
 
 parser = argparse.ArgumentParser(description='Simple processing script')
 parser.add_argument('-data_file', type=str, help='Input file')
@@ -31,6 +36,7 @@ parser.add_argument('-data_limit', type=int, default=None, help='Number of issue
 parser.add_argument('-test_limit', type=int, default=None, help='Number of issues to use for testing')
 parser.add_argument('-do_stemming', dest='do_stemming', action='store_true', help='Should stemming be used')
 parser.add_argument('-do_dictionary', dest='do_dictionary', action='store_true', help='Should dictionary be used')
+parser.add_argument('-model', dest='model', type=str, choices=model_map.keys(), help='Model to fit')
 
 logging.basicConfig(level=logging.INFO, filename="script_log", filemode="a+",
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -303,7 +309,7 @@ def main():
 
         processor = Processor(processor_config)
         comp = HashCompressor(args.selected)
-        gnbs = [MultinomialNB() for i in range(args.num_bench)]
+        gnbs = [model_map[args.model]() for i in range(args.num_bench)]
         counts = numpy.array([0 for i in range(args.num_bench)])
         lines_read = 0
 
