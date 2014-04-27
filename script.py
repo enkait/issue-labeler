@@ -1,3 +1,4 @@
+from __future__ import print_function
 from sklearn import linear_model, preprocessing
 from sklearn.decomposition import PCA
 import random
@@ -30,12 +31,14 @@ parser.add_argument('-test_file', type=str, help='Test file')
 parser.add_argument('-num_bench', type=int, default=5, help='Number of benchmarks')
 parser.add_argument('-selected', type=int, default=2000, help='Selected by hash compressor')
 parser.add_argument('-model_file', type=str, help='File to read/write model to')
+parser.add_argument('-stats_file', type=str, help='File to read/write stats to')
 parser.add_argument('-generate', dest='generate', action='store_true', help='Should the model be generated')
 parser.add_argument('-verbose', dest='verbose', action='store_true', help='Should we output compression details and model')
 parser.add_argument('-data_limit', type=int, default=None, help='Number of issues to use for training')
 parser.add_argument('-test_limit', type=int, default=None, help='Number of issues to use for testing')
 parser.add_argument('-do_stemming', dest='do_stemming', action='store_true', help='Should stemming be used')
 parser.add_argument('-do_dictionary', dest='do_dictionary', action='store_true', help='Should dictionary be used')
+parser.add_argument('-do_multi', dest='do_multi', action='store_true', help='Should multi be used')
 parser.add_argument('-model', dest='model', type=str, choices=model_map.keys(), help='Model to fit')
 
 logging.basicConfig(level=logging.INFO, filename="script_log", filemode="a+",
@@ -44,9 +47,10 @@ logging.basicConfig(level=logging.INFO, filename="script_log", filemode="a+",
 random.seed(6355)
 
 class ProcessorConfiguration:
-    def __init__(self, do_dictionary=False, do_stemming=False):
+    def __init__(self, do_dictionary=False, do_stemming=False, do_multi=False):
         self.do_dictionary = do_dictionary
         self.do_stemming = do_stemming
+        self.do_multi= do_multi
 
 class Processor:
     LABELS = {"enhancement" : "enhancement",
@@ -71,23 +75,35 @@ class Processor:
         self.__dict__ = new_state
         self.e = enchant.Dict("en_EN")
 
+    def merge_whitespace(self, text):
+        return " ".join(text.split()) #convert multiple whitespaces to single whitespace
+
     def process_text(self, text):
         features = []
         features += self.question_mark(text)
         text = re.sub("[^" + string.ascii_letters + "']", " ", text)
-        text = " ".join(text.split()) #convert multiple whitespaces to single whitespace
-        #text = text.lower()
+        text = self.merge_whitespace(text)
         text = self.capitalize_text(text)
         if self.config.do_dictionary:
             text = self.spell_check(text)
         if self.config.do_stemming:
             text = self.stemming(text)
-        text = self.process_negatives(text)
+        #text = self.process_negatives(text)
         features += text.split()
-        return text
+        return (features, text)
 
-    def process_word(self, word):
-        return word.strip()
+    def multi(self, words):
+        features = []
+        if self.config.do_multi:
+            for ind in range(len(words) - 1):
+                features.append(words[ind] + "->" + words[ind + 1])
+        return features
+
+    def process_words(self, text):
+        words = text.split()
+        features = []
+        features += self.multi(words)
+        return features
 
     def process_negatives(self, text):
         wordlist = text.split()
@@ -133,16 +149,16 @@ class Processor:
             return ["?"]
         return []
 
-    LOOKAHEAD = 1
-
     def add_features(self, pref, feature_list, out_features):
         for feature in feature_list:
             out_features[pref + "." + feature] += 1
-        #for ind in range(len(wordlist)):
-        #    for delta in range(1, min(self.LOOKAHEAD, len(wordlist) - ind)):
-        #        features[pref + "." + wordlist[ind] + "->" + wordlist[ind + delta]] += 1
-        #for ind in range(len(wordlist)-1):
-        #    features[pref + "." + wordlist[ind] + "->" + wordlist[ind+1]] += 1
+
+    def extract_features(self, obj, label, out_features):
+        if obj[label]:
+            obj[label] = re.sub("[^" + string.printable + "']", " ", obj[label])
+            (feature_list, text) = self.process_text(obj[label])
+            feature_list += self.process_words(text)
+            self.add_features(label, feature_list, out_features)
 
     def process_obj(self, obj):
         features = defaultdict(int)
@@ -155,33 +171,10 @@ class Processor:
             logging.warn("Zero labels found: %s", labels)
             return []
         if obj["body"]:
-            obj["body"] = re.sub("[^" + string.printable + "']", " ", obj["body"])
-            feature_list = self.process_text(obj["body"])
-            self.add_features("body", feature_list, features)
+            self.extract_features(obj, "body", features)
         if obj["title"]:
-            obj["title"] = re.sub("[^" + string.printable + "']", " ", obj["title"])
-            feature_list = self.process_text(obj["title"])
-            self.add_features("title", feature_list, features)
-        """
-        result = []
-        for label in labels:
-            nfeatures = dict(features)
-            nfeatures["ans:" + label] = 1
-            result.append((nfeatures, label, obj)) #SANITY CHECK
-        return result
-        """
+            self.extract_features(obj, "title", features)
         return [(features, label, obj) for label in labels]
-
-def pr(L):
-    for (features, result, obj) in L:
-        print result
-        print obj["url"]
-        for key, value in features.items():
-            print "    ", key, ":", value
-
-def pr_compressed(L):
-    for (features, result, obj) in L:
-        print result, obj["url"], features
 
 class HashCompressor:
     def __init__(self, chosen):
@@ -206,38 +199,6 @@ class HashCompressor:
             compressed.append((numpy.array(new_features), self.targets[result], obj))
         return compressed
 
-class Compressor:
-    CHOSEN = 1000
-    def learn(self, L):
-        words = defaultdict(int)
-        self.targets = {}
-        self.key_words = defaultdict(lambda: defaultdict(int))
-        counts = defaultdict(int)
-        for (features, result, obj) in L:
-            for key, value in features.items():
-                words[key] += 1
-            if result not in self.targets:
-                self.targets[result] = len(self.targets)
-            for key, value in features.items():
-                self.key_words[result][key] += 1
-            counts[result] += 1
-        occur = [(count, word) for (word, count) in words.items()]
-        self.choices = [word for (count, word) in sorted(occur)[-self.CHOSEN:]]
-        for key, value in self.key_words.items():
-            for key2, value2 in value.items():
-                print "%s.%s" % (key2, key), value2 * 1.0 / counts[key]
-        pprint.pprint(self.key_words)
-        print self.choices
-
-    def compress(self, L):
-        compressed = []
-        for (features, result, obj) in L:
-            new_features = []
-            for ch in self.choices:
-                new_features.append(features[ch])
-            compressed.append((numpy.array(new_features), self.targets[result], obj))
-        return compressed
-
 def feed(gnbs, objs):
     f, t, m = zip(*objs)
     counts = numpy.array([0 for i in range(len(gnbs))])
@@ -249,11 +210,12 @@ def feed(gnbs, objs):
     return counts
 
 class Tester:
-    def __init__(self, gnbs, counts, targets):
+    def __init__(self, gnbs, counts, targets, stats_file):
         self.gnbs = gnbs
         self.counts = counts
         self.targets = targets
         self.stats = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+        self.stats_file = stats_file
 
     def feed(self, objs):
         logging.info("Evaluating %s test objects", len(objs))
@@ -272,52 +234,66 @@ class Tester:
             self.stats[ind]["all"]["received"] += len(received)
 
         for ind, (a, b) in enumerate(zip(received, expected)):
-            print "+++++++++++++++++++++++++++++++++++++++++++++++"
-            print "Should be:", b, ", but was", a
-            print "title:", mt[ind]["title"]
-            print "body:", mt[ind]["body"]
+            self.print("+++++++++++++++++++++++++++++++++++++++++++++++")
+            self.print("Should be:", b, ", but was", a)
+            self.print("title:", mt[ind]["title"])
+            self.print("body:", mt[ind]["body"])
             for ftkey, ftval in enumerate(ft[ind]):
-                print "*******************************"
                 if ftval > 0:
-                    print "(%s,%s):" % (ftkey, ftval)
+                    self.print("*******************************")
+                    self.print("(%s,%s):" % (ftkey, ftval))
                     for clsname, clsid in self.targets.items():
                         log_prob = gnb.feature_log_prob_[clsid][ftkey]
-                        print "        %s[%s]=%s" % (clsname, ftkey, log_prob)
-            print "labels:", [o["name"] for o in mt[ind]["labels"]]
-            print "url:", mt[ind]["url"]
-            print "html url:", mt[ind]["html_url"]
-            print "+++++++++++++++++++++++++++++++++++++++++++++++"
+                        self.print("        %s[%s]=%s" % (clsname, ftkey, log_prob))
+            self.print("labels:", [o["name"] for o in mt[ind]["labels"]])
+            self.print("url:", mt[ind]["url"])
+            self.print("html url:", mt[ind]["html_url"])
+            self.print("+++++++++++++++++++++++++++++++++++++++++++++++")
 
     def format_ratio(self, a, b):
         return "%s/%s = (%s)" % (a, b, a * 1.0 / b)
 
+    def print(self, *args, **kwargs):
+        print(*args, file=self.stats_file, **kwargs)
+
     def format_results(self, stats):
         for target_name, details in stats.items():
-            print "    for %s: precision: %s, recall: %s" % (target_name,
+            self.print("    for %s: precision: %s, recall: %s" % (target_name,
                     self.format_ratio(details["correct"], details["retrieved"]),
-                    self.format_ratio(details["correct"], details["received"]))
+                    self.format_ratio(details["correct"], details["received"])))
 
     def print_stats(self):
         for ind, (gnb, count) in enumerate(zip(self.gnbs, self.counts)):
-            print "---------------------------------------------"
-            print "For %d learning examples" % (count,)
+            self.print("---------------------------------------------")
+            self.print("For %d learning examples" % (count,))
             self.format_results(self.stats[ind])
-            print "---------------------------------------------"
+            self.print("---------------------------------------------")
+
+def assert_test_file(args):
+    if args.test_file:
+        if not args.stats_file:
+            print("No file to store stats in")
+            exit(1)
+        if os.path.exists(args.stats_file):
+            print("Stats file path exists")
+            exit(1)
 
 def main():
     args = parser.parse_args()
 
+    assert_test_file(args)
+
     if args.generate:
         if not args.model_file:
-            print "No file to store model in"
+            print("No file to store model in")
             exit(1)
         if os.path.exists(args.model_file):
-            print "Model file path exists"
+            print("Model file path exists")
             exit(1)
         logging.info("Generating models")
 
         processor_config = ProcessorConfiguration(do_dictionary=args.do_dictionary,
-                do_stemming=args.do_stemming)
+                do_stemming=args.do_stemming, do_multi=args.do_multi)
 
         processor = Processor(processor_config)
         comp = HashCompressor(args.selected)
@@ -361,28 +337,31 @@ def main():
     if args.test_file:
         logging.info("Evaluating models on test data set")
 
-        tester = Tester(gnbs, counts, comp.targets)
+        assert_test_file(args)
 
-        lines_read = 0
+        with open(args.stats_file, "w") as stats_file:
+            tester = Tester(gnbs, counts, comp.targets, stats_file)
 
-        with open(args.test_file, "r") as inp:
-            test_objs = []
-            while True:
-                line = inp.readline()
-                if not line or lines_read == args.test_limit:
-                    tester.feed(test_objs)
-                    break
-                lines_read += 1
-                obj = json.loads(line.strip())
-                proc_objs = processor.process_obj(obj)
-                comp_objs = comp.compress(proc_objs)
-                test_objs += comp_objs
+            lines_read = 0
 
-                if len(test_objs) >= 500:
-                    tester.feed(test_objs)
-                    test_objs = []
+            with open(args.test_file, "r") as inp:
+                test_objs = []
+                while True:
+                    line = inp.readline()
+                    if not line or lines_read == args.test_limit:
+                        tester.feed(test_objs)
+                        break
+                    lines_read += 1
+                    obj = json.loads(line.strip())
+                    proc_objs = processor.process_obj(obj)
+                    comp_objs = comp.compress(proc_objs)
+                    test_objs += comp_objs
 
-        tester.print_stats()
+                    if len(test_objs) >= 500:
+                        tester.feed(test_objs)
+                        test_objs = []
+
+            tester.print_stats()
 
 if __name__ == "__main__":
     main()
