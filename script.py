@@ -40,6 +40,7 @@ parser.add_argument('-do_stemming', dest='do_stemming', action='store_true', hel
 parser.add_argument('-do_dictionary', dest='do_dictionary', action='store_true', help='Should dictionary be used')
 parser.add_argument('-do_multi', dest='do_multi', action='store_true', help='Should multi be used')
 parser.add_argument('-model', dest='model', type=str, choices=model_map.keys(), help='Model to fit')
+parser.add_argument('-evaluate_on_data', dest='evaluate_on_data', action='store_true', help='Evaluate on data')
 
 logging.basicConfig(level=logging.INFO, filename="script_log", filemode="a+",
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -210,12 +211,13 @@ def feed(gnbs, objs):
     return counts
 
 class Tester:
-    def __init__(self, gnbs, counts, targets, stats_file):
+    def __init__(self, gnbs, counts, targets, stats_file, verbose):
         self.gnbs = gnbs
         self.counts = counts
         self.targets = targets
         self.stats = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
         self.stats_file = stats_file
+        self.verbose = verbose
 
     def feed(self, objs):
         logging.info("Evaluating %s test objects", len(objs))
@@ -233,22 +235,23 @@ class Tester:
             self.stats[ind]["all"]["retrieved"] += len(received)
             self.stats[ind]["all"]["received"] += len(received)
 
-        for ind, (a, b) in enumerate(zip(received, expected)):
-            self.print("+++++++++++++++++++++++++++++++++++++++++++++++")
-            self.print("Should be:", b, ", but was", a)
-            self.print("title:", mt[ind]["title"])
-            self.print("body:", mt[ind]["body"])
-            for ftkey, ftval in enumerate(ft[ind]):
-                if ftval > 0:
-                    self.print("*******************************")
-                    self.print("(%s,%s):" % (ftkey, ftval))
-                    for clsname, clsid in self.targets.items():
-                        log_prob = gnb.feature_log_prob_[clsid][ftkey]
-                        self.print("        %s[%s]=%s" % (clsname, ftkey, log_prob))
-            self.print("labels:", [o["name"] for o in mt[ind]["labels"]])
-            self.print("url:", mt[ind]["url"])
-            self.print("html url:", mt[ind]["html_url"])
-            self.print("+++++++++++++++++++++++++++++++++++++++++++++++")
+        if self.verbose:
+            for ind, (a, b) in enumerate(zip(received, expected)):
+                self.print("+++++++++++++++++++++++++++++++++++++++++++++++")
+                self.print("Should be:", b, ", but was", a)
+                self.print("title:", mt[ind]["title"])
+                self.print("body:", mt[ind]["body"])
+                for ftkey, ftval in enumerate(ft[ind]):
+                    if ftval > 0:
+                        self.print("*******************************")
+                        self.print("(%s,%s):" % (ftkey, ftval))
+                        for clsname, clsid in self.targets.items():
+                            log_prob = gnb.feature_log_prob_[clsid][ftkey]
+                            self.print("        %s[%s]=%s" % (clsname, ftkey, log_prob))
+                self.print("labels:", [o["name"] for o in mt[ind]["labels"]])
+                self.print("url:", mt[ind]["url"])
+                self.print("html url:", mt[ind]["html_url"])
+                self.print("+++++++++++++++++++++++++++++++++++++++++++++++")
 
     def format_ratio(self, a, b):
         return "%s/%s = (%s)" % (a, b, a * 1.0 / b)
@@ -269,8 +272,8 @@ class Tester:
             self.format_results(self.stats[ind])
             self.print("---------------------------------------------")
 
-def assert_test_file(args):
-    if args.test_file:
+def assert_stats_file_doesnt_exist(args):
+    if args.test_file or (args.data_file and args.evaluate_on_data):
         if not args.stats_file:
             print("No file to store stats in")
             exit(1)
@@ -278,10 +281,28 @@ def assert_test_file(args):
             print("Stats file path exists")
             exit(1)
 
+def feed_tester(tester, processor, comp, test_file, test_limit=None):
+    lines_read = 0
+    test_objs = []
+    while True:
+        line = test_file.readline()
+        if not line or lines_read == test_limit:
+            tester.feed(test_objs)
+            break
+        lines_read += 1
+        obj = json.loads(line.strip())
+        proc_objs = processor.process_obj(obj)
+        comp_objs = comp.compress(proc_objs)
+        test_objs += comp_objs
+
+        if len(test_objs) >= 500:
+            tester.feed(test_objs)
+            test_objs = []
+
 def main():
     args = parser.parse_args()
 
-    assert_test_file(args)
+    assert_stats_file_doesnt_exist(args)
 
     if args.generate:
         if not args.model_file:
@@ -334,34 +355,21 @@ def main():
             counts = pickle.load(model_file)
             gnb = gnbs[-1]
 
-    if args.test_file:
-        logging.info("Evaluating models on test data set")
+    assert_stats_file_doesnt_exist(args)
+    with open(args.stats_file, "w") as stats_file:
+        if args.test_file:
+            logging.info("Evaluating models on test data set")
+            with open(args.test_file, "r") as test_file:
+                tester = Tester(gnbs, counts, comp.targets, stats_file, True)
+                feed_tester(tester, processor, comp, test_file, args.test_limit)
+                tester.print_stats()
 
-        assert_test_file(args)
-
-        with open(args.stats_file, "w") as stats_file:
-            tester = Tester(gnbs, counts, comp.targets, stats_file)
-
-            lines_read = 0
-
-            with open(args.test_file, "r") as inp:
-                test_objs = []
-                while True:
-                    line = inp.readline()
-                    if not line or lines_read == args.test_limit:
-                        tester.feed(test_objs)
-                        break
-                    lines_read += 1
-                    obj = json.loads(line.strip())
-                    proc_objs = processor.process_obj(obj)
-                    comp_objs = comp.compress(proc_objs)
-                    test_objs += comp_objs
-
-                    if len(test_objs) >= 500:
-                        tester.feed(test_objs)
-                        test_objs = []
-
-            tester.print_stats()
+        if args.data_file and args.evaluate_on_data:
+            logging.info("Evaluating models on train data set")
+            with open(args.data_file, "r") as data_file:
+                tester = Tester(gnbs, counts, comp.targets, stats_file, False)
+                feed_tester(tester, processor, comp, data_file)
+                tester.print_stats()
 
 if __name__ == "__main__":
     main()
