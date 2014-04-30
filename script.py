@@ -155,11 +155,11 @@ class Processor:
             out_features[pref + "." + feature] += 1
 
     def remove_unprintable(self, text):
-        restext = ""
+        restext = []
         for c in text:
             if c in string.printable:
                 restext.append(c)
-        return restext
+        return "".join(restext)
 
     def extract_features(self, obj, label, out_features):
         if obj[label]:
