@@ -154,9 +154,16 @@ class Processor:
         for feature in feature_list:
             out_features[pref + "." + feature] += 1
 
+    def remove_unprintable(self, text):
+        restext = ""
+        for c in text:
+            if c in string.printable:
+                restext.append(c)
+        return restext
+
     def extract_features(self, obj, label, out_features):
         if obj[label]:
-            obj[label] = re.sub("[^" + string.printable + "']", " ", obj[label])
+            obj[label] = self.remove_unprintable(obj[label])
             (feature_list, text) = self.process_text(obj[label])
             feature_list += self.process_words(text)
             self.add_features(label, feature_list, out_features)
