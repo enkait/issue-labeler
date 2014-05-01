@@ -268,9 +268,13 @@ class Tester:
 
     def format_results(self, stats):
         for target_name, details in stats.items():
-            self.print("    for %s: precision: %s, recall: %s" % (target_name,
-                    self.format_ratio(details["correct"], details["retrieved"]),
-                    self.format_ratio(details["correct"], details["received"])))
+            if target_name != "all":
+                self.print("    for %s: precision: %s, recall: %s" % (target_name,
+                        self.format_ratio(details["correct"], details["retrieved"]),
+                        self.format_ratio(details["correct"], details["received"])))
+            else:
+                self.print("    for %s: result: %s" % (target_name,
+                        self.format_ratio(details["correct"], details["received"])))
 
     def print_stats(self):
         for ind, (gnb, count) in enumerate(zip(self.gnbs, self.counts)):
