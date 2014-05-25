@@ -8,9 +8,10 @@ for line in open("data_list"):
     if random.random() < 0.01:
         L.append(line)
 
-filL = random.sample(L, 50)
+filL = random.sample(L, 100)
 
 points = 0
+processed = 0
 for line in filL:
     obj = json.loads(line.strip())
     title = re.sub("[^" + string.printable + "]", "", obj['title'])
@@ -22,12 +23,13 @@ for line in filL:
     res = res.strip()
     for label in obj['labels']:
         if res == 'enhancement' \
-                and (label['name'] == 'enhancement' or label['name'] == 'feature'):
+                and (label['name'].lower() == 'enhancement' or label['name'].lower() == 'feature'):
             points += 1
             break
-        elif res != 'enhancement' and label['name'] == res:
+        elif res != 'enhancement' and label['name'].lower() == res:
             points += 1
             break
-    print "Result: ", points
+    processed += 1
+    print "Result: %s out of %s" % (points, processed)
 
 print "Final result: ", points
