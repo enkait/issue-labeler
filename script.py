@@ -99,8 +99,8 @@ class Processor:
     def multi(self, words):
         features = []
         if self.config.do_multi:
-            for ind in range(len(words) - 1):
-                features.append(words[ind] + "->" + words[ind + 1])
+            for ind in range(len(words) - 2):
+                features.append(words[ind] + "->" + words[ind + 1] + "->" + words[ind + 2])
         return features
 
     def process_words(self, text):
