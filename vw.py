@@ -1,14 +1,15 @@
+#! /usr/bin/python
+
 from __future__ import print_function
 import random
 import logging
 from collections import defaultdict
 import argparse
 import os
-from script import Feeder, MultiConsumer, IdentityCompressor, Processor, ProcessorConfiguration
-
-model_map = {
-    'BernoulliNB': BernoulliNB, 'MultinomialNB': MultinomialNB,
-}
+import math
+import subprocess
+import sys
+from script import Feeder, MultiConsumer, Processor, ProcessorConfiguration
 
 parser = argparse.ArgumentParser(description='Simple processing script')
 parser.add_argument('-input_file', type=str, help='Input file')
@@ -16,21 +17,37 @@ parser.add_argument('-output_file', type=str, help='Where should the vw transfor
 parser.add_argument('-do_stemming', dest='do_stemming', action='store_true', help='Should stemming be used')
 parser.add_argument('-do_dictionary', dest='do_dictionary', action='store_true', help='Should dictionary be used')
 parser.add_argument('-do_multi', dest='do_multi', action='store_true', help='Should multi be used')
+parser.add_argument('-split', type=int, help='Number of divisions to split the work to')
+parser.add_argument('-worker', dest='worker', action='store_true', help='Are we a worker')
+parser.add_argument('-worker_skip', type=int, help='How many lines to skip at start')
+parser.add_argument('-worker_size', type=int, help='How many lines to process')
+parser.add_argument('-worker_id', type=int, help='Worker id')
 
-logging.basicConfig(level=logging.INFO, filename="vw_log", filemode="a+",
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logging.basicConfig(level=logging.INFO, filename="vw_log", filemode="a+", format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 random.seed(6355)
 
 def check_args_consistent(args):
+    if args.worker:
+        if args.worker_size == 0:
+            print("Missing worker size")
+            exit(1)
+    else:
+        if not args.split:
+            args.split = 1
     if not args.input_file or not args.output_file:
         print("Input/output files not provided")
-    if os.path.exists(args.input_file):
-        print("Input file path exists")
+        exit(1)
+    if not os.path.exists(args.input_file):
+        print("Input file path doesn't exist")
         exit(1)
     if os.path.exists(args.output_file):
         print("Output file path exists")
         exit(1)
+
+class IdentityCompressor:
+    def compress(self, L):
+        return L
 
 class VWConsumer:
     def __init__(self, output_file):
@@ -52,23 +69,56 @@ class VWConsumer:
     def done(self):
         self.output_file.close()
 
+def count_lines(file_path):
+    lines = 0
+    with open(file_path, "r") as inp:
+        while inp.readline():
+            lines += 1
+    return lines
+
 def main():
     args = parser.parse_args()
 
     check_args_consistent(args)
 
-    processor_config = ProcessorConfiguration(do_dictionary=args.do_dictionary,
-            do_stemming=args.do_stemming, do_multi=args.do_multi)
-    processor = Processor(processor_config)
-    comp = IdentityCompressor()
+    if args.worker:
+        logging.info("Running worker: " + str(sys.argv))
 
-    consumer = MultiConsumer()
-    vw_output = open(args.output_file, "w")
-    consumer.add_consumer(VWConsumer(vw_output))
+        processor_config = ProcessorConfiguration(do_dictionary=args.do_dictionary,
+                do_stemming=args.do_stemming, do_multi=args.do_multi)
+        processor = Processor(processor_config)
+        comp = IdentityCompressor()
 
-    with open(args.input_file, "r") as inp:
-        Feeder(processor, comp, inp, None).feed(consumer)
-    consumer.done()
+        consumer = MultiConsumer()
+        vw_output = open(args.output_file + "." + str(args.worker_id), "w")
+        consumer.add_consumer(VWConsumer(vw_output))
+
+        with open(args.input_file, "r") as inp:
+            Feeder(processor, comp, inp, args.worker_size, args.worker_skip).feed(consumer)
+        consumer.done()
+        logging.info("Worker: " + str(sys.argv) + " finished")
+
+    else:
+        line_count = count_lines(args.input_file)
+        split_size = int(math.ceil(1.0 * line_count / args.split))
+
+        cur_skip = 0
+        processes = []
+        for i in range(args.split):
+            args = sys.argv[:]
+            args[0] = "./" + args[0]
+            args.append("-worker")
+            args.append("-worker_skip")
+            args.append(str(cur_skip))
+            args.append("-worker_size")
+            args.append(str(split_size))
+            args.append("-worker_id")
+            args.append(str(i))
+            cur_skip += split_size
+            processes.append(subprocess.Popen(args))
+
+        for process in processes:
+            process.wait()
 
 if __name__ == "__main__":
     main()

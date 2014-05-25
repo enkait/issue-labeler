@@ -306,25 +306,29 @@ def check_args_consistent(args):
             exit(1)
 
 class Feeder:
-    def __init__(self, processor, comp, source_file, source_limit=None):
+    def __init__(self, processor, comp, source_file, source_limit=None, source_skip=None):
         self.processor = processor
         self.comp = comp
         self.source_file = source_file
         self.source_limit = source_limit
+        self.source_skip = source_skip
 
     def feed(self, consumer):
         lines_read = 0
+        lines_processed = 0
         test_objs = []
         while True:
             line = self.source_file.readline()
-            if not line or lines_read == self.source_limit:
+            if not line or lines_processed == self.source_limit:
                 consumer.consume(test_objs)
                 break
             lines_read += 1
-            obj = json.loads(line.strip())
-            proc_objs = self.processor.process_obj(obj)
-            comp_objs = self.comp.compress(proc_objs)
-            test_objs += comp_objs
+            if self.source_skip != None and lines_read > self.source_skip:
+                lines_processed += 1
+                obj = json.loads(line.strip())
+                proc_objs = self.processor.process_obj(obj)
+                comp_objs = self.comp.compress(proc_objs)
+                test_objs += comp_objs
 
             if len(test_objs) >= 500:
                 consumer.consume(test_objs)
