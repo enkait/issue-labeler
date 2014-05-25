@@ -48,6 +48,7 @@ def add_parser_arguments(parser):
     parser.add_argument('-do_stemming', dest='do_stemming', action='store_true', help='Should stemming be used')
     parser.add_argument('-do_dictionary', dest='do_dictionary', action='store_true', help='Should dictionary be used to filter words')
     parser.add_argument('-do_correct_spelling', dest='do_correct_spelling', action='store_true', help='Should dictionary be used to correct spelling')
+    parser.add_argument('-do_filter_common', dest='do_filter_common', action='store_true', help='Should filtering of common words be used')
     parser.add_argument('-do_multi', dest='do_multi', action='store_true', help='Should multi be used')
     parser.add_argument('-model', dest='model', type=str, choices=model_map.keys(), help='Model to fit')
     parser.add_argument('-evaluate_on_train', dest='evaluate_on_train', action='store_true', help='Evaluate on train')
@@ -56,18 +57,13 @@ logging.basicConfig(level=logging.INFO, filename="script_log", filemode="a+",
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 class ProcessorConfiguration:
-    def __init__(self, do_dictionary=False, do_correct_spelling=False, do_stemming=False, do_multi=False):
-        self.do_dictionary = do_dictionary
-        self.do_correct_spelling= do_correct_spelling
-        self.do_stemming = do_stemming
-        self.do_multi= do_multi
-
     @staticmethod
     def FromArgs(args):
         result = ProcessorConfiguration()
         result.do_dictionary = args.do_dictionary
         result.do_correct_spelling = args.do_correct_spelling
         result.do_stemming = args.do_stemming
+        result.do_filter_common = args.do_filter_common
         result.do_multi= args.do_multi
         return result
 
@@ -104,6 +100,8 @@ class Processor:
         text = re.sub("[^" + string.ascii_letters + "']", " ", text)
         text = self.merge_whitespace(text)
         text = self.capitalize_text(text)
+        if self.config.do_filter_common:
+            text = self.filter_common(text)
         if self.config.do_correct_spelling:
             text = self.spell_fix(text)
         if self.config.do_dictionary:
@@ -120,6 +118,14 @@ class Processor:
             for ind in range(len(words) - 2):
                 features.append(words[ind] + "->" + words[ind + 1] + "->" + words[ind + 2])
         return features
+
+    def filter_common(self, text):
+        result = []
+        for word in text.split():
+            if not word.lower() in ["the", "to", "a", "in", "is", "and", "i", "of", "for", "it", "this",
+                    "on", "at", "be", "with", "that", "if", "from", "when", "as", "but", "you", "have", "an", "are", "file", "or", "by"]:
+                result.append(word)
+        return " ".join(result)
 
     def process_words(self, text):
         words = text.split()
