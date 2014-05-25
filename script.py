@@ -100,6 +100,7 @@ class Processor:
     def process_text(self, text):
         features = []
         features += self.question_mark(text)
+        features += self.url(text)
         text = re.sub("[^" + string.ascii_letters + "']", " ", text)
         text = self.merge_whitespace(text)
         text = self.capitalize_text(text)
@@ -178,6 +179,11 @@ class Processor:
             else:
                 words.append(word.lower())
         return " ".join(words)
+
+    def url(self, text):
+        if "http://" in text or "https://" in text:
+            return ["URL"]
+        return []
 
     def question_mark(self, text):
         if "?" in text:
