@@ -13,6 +13,7 @@ import logging
 from collections import defaultdict
 import string
 from sklearn.naive_bayes import GaussianNB, MultinomialNB, BernoulliNB
+from sklearn.linear_model import SGDClassifier
 import numpy
 import argparse
 import pickle
@@ -23,38 +24,52 @@ from stemming.porter2 import stem
 model_map = {
     'BernoulliNB': BernoulliNB,
     'MultinomialNB': MultinomialNB,
+    'LogisticRegressionSGD': lambda : SGDClassifier(loss="log"),
+    'ModifiedHuberSGD': lambda : SGDClassifier(loss="modified_huber"),
+    'HingeSGD': lambda : SGDClassifier(loss="hinge"),
 }
 
-parser = argparse.ArgumentParser(description='Simple processing script')
-parser.add_argument('-train_file', type=str, help='train file')
-parser.add_argument('-test_file', type=str, help='Test file')
-parser.add_argument('-num_bench', type=int, default=5, help='Number of benchmarks')
-parser.add_argument('-selected', type=int, default=2000, help='Selected by hash compressor')
-parser.add_argument('-model_file', type=str, help='File to read/write model to')
-parser.add_argument('-stats_file', type=str, help='File to read/write stats to')
-parser.add_argument('-generate', dest='generate', action='store_true', help='Should the model be generated')
-parser.add_argument('-evaluate_test', dest='evaluate_test', action='store_true', help='Should the test set be evaluated')
-parser.add_argument('-vectorize_train_output', type=str, help='Where should the vectorized train data be stored')
-parser.add_argument('-vectorize_test_output', type=str, help='Where should the vectorized test data be stored')
-parser.add_argument('-verbose', dest='verbose', action='store_true', help='Should we output compression details and model')
-parser.add_argument('-train_limit', type=int, default=None, help='Number of issues to use for training')
-parser.add_argument('-test_limit', type=int, default=None, help='Number of issues to use for testing')
-parser.add_argument('-do_stemming', dest='do_stemming', action='store_true', help='Should stemming be used')
-parser.add_argument('-do_dictionary', dest='do_dictionary', action='store_true', help='Should dictionary be used')
-parser.add_argument('-do_multi', dest='do_multi', action='store_true', help='Should multi be used')
-parser.add_argument('-model', dest='model', type=str, choices=model_map.keys(), help='Model to fit')
-parser.add_argument('-evaluate_on_train', dest='evaluate_on_train', action='store_true', help='Evaluate on train')
+random.seed(6355)
+
+def add_parser_arguments(parser):
+    parser.add_argument('-train_file', type=str, help='train file')
+    parser.add_argument('-test_file', type=str, help='Test file')
+    parser.add_argument('-num_bench', type=int, default=5, help='Number of benchmarks')
+    parser.add_argument('-selected', type=int, default=2000, help='Selected by hash compressor')
+    parser.add_argument('-model_file', type=str, help='File to read/write model to')
+    parser.add_argument('-stats_file', type=str, help='File to read/write stats to')
+    parser.add_argument('-generate', dest='generate', action='store_true', help='Should the model be generated')
+    parser.add_argument('-evaluate_test', dest='evaluate_test', action='store_true', help='Should the test set be evaluated')
+    parser.add_argument('-vectorize_train_output', type=str, help='Where should the vectorized train data be stored')
+    parser.add_argument('-vectorize_test_output', type=str, help='Where should the vectorized test data be stored')
+    parser.add_argument('-verbose', dest='verbose', action='store_true', help='Should we output compression details and model')
+    parser.add_argument('-train_limit', type=int, default=None, help='Number of issues to use for training')
+    parser.add_argument('-test_limit', type=int, default=None, help='Number of issues to use for testing')
+    parser.add_argument('-do_stemming', dest='do_stemming', action='store_true', help='Should stemming be used')
+    parser.add_argument('-do_dictionary', dest='do_dictionary', action='store_true', help='Should dictionary be used to filter words')
+    parser.add_argument('-do_correct_spelling', dest='do_correct_spelling', action='store_true', help='Should dictionary be used to correct spelling')
+    parser.add_argument('-do_multi', dest='do_multi', action='store_true', help='Should multi be used')
+    parser.add_argument('-model', dest='model', type=str, choices=model_map.keys(), help='Model to fit')
+    parser.add_argument('-evaluate_on_train', dest='evaluate_on_train', action='store_true', help='Evaluate on train')
 
 logging.basicConfig(level=logging.INFO, filename="script_log", filemode="a+",
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
-random.seed(6355)
-
 class ProcessorConfiguration:
-    def __init__(self, do_dictionary=False, do_stemming=False, do_multi=False):
+    def __init__(self, do_dictionary=False, do_correct_spelling=False, do_stemming=False, do_multi=False):
         self.do_dictionary = do_dictionary
+        self.do_correct_spelling= do_correct_spelling
         self.do_stemming = do_stemming
         self.do_multi= do_multi
+
+    @staticmethod
+    def FromArgs(args):
+        result = ProcessorConfiguration()
+        result.do_dictionary = args.do_dictionary
+        result.do_correct_spelling = args.do_correct_spelling
+        result.do_stemming = args.do_stemming
+        result.do_multi= args.do_multi
+        return result
 
 class Processor:
     LABELS = {"enhancement" : "enhancement",
@@ -88,6 +103,8 @@ class Processor:
         text = re.sub("[^" + string.ascii_letters + "']", " ", text)
         text = self.merge_whitespace(text)
         text = self.capitalize_text(text)
+        if self.config.do_correct_spelling:
+            text = self.spell_fix(text)
         if self.config.do_dictionary:
             text = self.spell_check(text)
         if self.config.do_stemming:
@@ -120,6 +137,20 @@ class Processor:
             else:
                 processedlist.append(wordlist[ind])
                 ind += 1
+        return " ".join(processedlist)
+
+    def dict_suggest(self, word):
+        w = "#"
+        for w in self.e.suggest(word):
+            if w == w.lower():
+                return w
+        return w
+
+    def spell_fix(self, text):
+        wordlist = text.split()
+        processedlist = []
+        for word in wordlist:
+            processedlist.append(self.dict_suggest(word))
         return " ".join(processedlist)
 
     def spell_check(self, text):
@@ -216,7 +247,7 @@ def feed(gnbs, objs):
     for ind, gnb in enumerate(gnbs):
         if random.random() < 1. * (ind+1) / len(gnbs):
             counts[ind] += len(f)
-            gnb.partial_fit(f, t, [0, 1, 2], 1)
+            gnb.partial_fit(f, t, [0, 1, 2])
     logging.info("fed %s objects, counts: %s", len(objs), counts)
     return counts
 
@@ -245,6 +276,7 @@ class Tester:
             self.stats[ind]["all"]["retrieved"] += len(received)
             self.stats[ind]["all"]["received"] += len(received)
 
+        """
         if self.verbose:
             for ind, (a, b) in enumerate(zip(received, expected)):
                 self.print("+++++++++++++++++++++++++++++++++++++++++++++++")
@@ -262,6 +294,7 @@ class Tester:
                 self.print("url:", mt[ind]["url"])
                 self.print("html url:", mt[ind]["html_url"])
                 self.print("+++++++++++++++++++++++++++++++++++++++++++++++")
+        """
 
     def format_ratio(self, a, b):
         return "%s/%s = (%s)" % (a, b, a * 1.0 / b)
@@ -323,7 +356,7 @@ class Feeder:
                 consumer.consume(test_objs)
                 break
             lines_read += 1
-            if self.source_skip != None and lines_read > self.source_skip:
+            if self.source_skip == None or (self.source_skip != None and lines_read > self.source_skip):
                 lines_processed += 1
                 obj = json.loads(line.strip())
                 proc_objs = self.processor.process_obj(obj)
@@ -393,13 +426,14 @@ class MultiConsumer:
             consumer.done()
 
 def main():
+    parser = argparse.ArgumentParser(description='Simple processing script')
+    add_parser_arguments(parser)
     args = parser.parse_args()
 
     check_args_consistent(args)
 
     if args.generate or args.vectorize_train_output:
-        processor_config = ProcessorConfiguration(do_dictionary=args.do_dictionary,
-                do_stemming=args.do_stemming, do_multi=args.do_multi)
+        processor_config = ProcessorConfiguration.FromArgs(args)
 
         processor = Processor(processor_config)
         comp = HashCompressor(args.selected)

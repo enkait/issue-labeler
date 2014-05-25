@@ -10,22 +10,20 @@ import math
 import subprocess
 import sys
 from script import Feeder, MultiConsumer, Processor, ProcessorConfiguration
-
-parser = argparse.ArgumentParser(description='Simple processing script')
-parser.add_argument('-input_file', type=str, help='Input file')
-parser.add_argument('-output_file', type=str, help='Where should the vw transformed input be stored')
-parser.add_argument('-do_stemming', dest='do_stemming', action='store_true', help='Should stemming be used')
-parser.add_argument('-do_dictionary', dest='do_dictionary', action='store_true', help='Should dictionary be used')
-parser.add_argument('-do_multi', dest='do_multi', action='store_true', help='Should multi be used')
-parser.add_argument('-split', type=int, help='Number of divisions to split the work to')
-parser.add_argument('-worker', dest='worker', action='store_true', help='Are we a worker')
-parser.add_argument('-worker_skip', type=int, help='How many lines to skip at start')
-parser.add_argument('-worker_size', type=int, help='How many lines to process')
-parser.add_argument('-worker_id', type=int, help='Worker id')
-
-logging.basicConfig(level=logging.INFO, filename="vw_log", filemode="a+", format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+from script import add_parser_arguments as script_add_parser_arguments
 
 random.seed(6355)
+
+def add_parser_arguments(parser):
+    parser.add_argument('-input_file', type=str, help='Input file')
+    parser.add_argument('-output_file', type=str, help='Where should the vw transformed input be stored')
+    parser.add_argument('-split', type=int, help='Number of divisions to split the work to')
+    parser.add_argument('-worker', dest='worker', action='store_true', help='Are we a worker')
+    parser.add_argument('-worker_skip', type=int, help='How many lines to skip at start')
+    parser.add_argument('-worker_size', type=int, help='How many lines to process')
+    parser.add_argument('-worker_id', type=int, help='Worker id')
+
+logging.basicConfig(level=logging.INFO, filename="vw_log", filemode="a+", format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 def check_args_consistent(args):
     if args.worker:
@@ -77,6 +75,9 @@ def count_lines(file_path):
     return lines
 
 def main():
+    parser = argparse.ArgumentParser(description='Simple processing script')
+    add_parser_arguments(parser)
+    script_add_parser_arguments(parser)
     args = parser.parse_args()
 
     check_args_consistent(args)
@@ -84,8 +85,7 @@ def main():
     if args.worker:
         logging.info("Running worker: " + str(sys.argv))
 
-        processor_config = ProcessorConfiguration(do_dictionary=args.do_dictionary,
-                do_stemming=args.do_stemming, do_multi=args.do_multi)
+        processor_config = ProcessorConfiguration.FromArgs(args)
         processor = Processor(processor_config)
         comp = IdentityCompressor()
 
