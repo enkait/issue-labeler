@@ -50,11 +50,13 @@ class IdentityCompressor:
 class VWConsumer:
     def __init__(self, output_file):
         self.output_file = output_file
-        self.target_lookup = defaultdict(int)
+        self.target_lookup = {
+            "enhancement": 1,
+            "bug": 2,
+            "question": 3,
+        }
 
     def process_row(self, features, t):
-        if t not in self.target_lookup:
-            self.target_lookup[t] = len(self.target_lookup) + 1
         self.output_file.write(str(self.target_lookup[t]) + " |")
         for f in features:
             self.output_file.write(" " + f + ":1.0")
