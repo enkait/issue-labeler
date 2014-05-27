@@ -57,7 +57,7 @@ class VWConsumer:
         }
 
     def process_row(self, features, t):
-        self.output_file.write(str(self.target_lookup[t]) + " |")
+        self.output_file.write(str(self.target_lookup[t]) + " |x")
         for f in features:
             self.output_file.write(" " + f + ":1.0")
         self.output_file.write("\n")
