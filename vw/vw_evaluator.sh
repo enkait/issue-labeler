@@ -1,7 +1,7 @@
 train=hugedata_vw
 train_small=hugedata_vw_small
-huge_test_set=hugecv_vw
-split=10
+test_set=hugecv_vw
+split=1
 
 count=`wc -l $train | cut -f 1 -d " "`
 split_size=$(((count + (split - 1)) / split))
@@ -34,5 +34,5 @@ for i in `seq 1 $split`; do
     head -n $samples $train > $train_small
     train $train_small
     eval_test $train_small
-    eval_test $huge_test_set
+    eval_test $test_set
 done
