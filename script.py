@@ -443,7 +443,7 @@ def load_model(model_file):
     comp = pickle.load(model_file)
     gnbs = pickle.load(model_file)
     counts = pickle.load(model_file)
-    return (comp, gnbs, counts)
+    return (processor, comp, gnbs, counts)
 
 def main():
     parser = argparse.ArgumentParser(description='Simple processing script')
@@ -476,7 +476,7 @@ def main():
     elif not args.generate and args.model_file:
         logging.info("Loading models from file")
         with open(args.model_file, "r") as model_file:
-            comp, gnbs, counts = load_model(model_file)
+            processor, comp, gnbs, counts = load_model(model_file)
 
     with open(args.stats_file, "w") as stats_file:
         test_consumer = MultiConsumer()
