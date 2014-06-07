@@ -230,27 +230,38 @@ class Processor:
             self.extract_features(obj, "title", features)
         return [(features, label, obj) for label in labels]
 
+    def process_title_body(self, title, body):
+        obj = {"title": title, "body": body}
+        features = defaultdict(int)
+        self.extract_features(obj, "body", features)
+        self.extract_features(obj, "title", features)
+        return features
+
 class HashCompressor:
     def __init__(self, chosen):
         self.words = defaultdict(set)
         self.targets = {}
         self.chosen = chosen
 
+    def compress_features(self, features):
+        new_features = [0 for i in range(self.chosen)]
+        for key, value in features.items():
+            enc = hash(key) % (2 * self.chosen)
+            #sign = -1 if enc < self.chosen else 1
+            sign = 1 # CAREEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEe
+            enc %= self.chosen
+            #new_features[enc] += value * 1.0 * sign
+            new_features[enc] = 1. # ZERO or ONE
+            self.words[enc].add(key)
+        return numpy.array(new_features)
+
     def compress(self, L):
         compressed = []
         for (features, result, obj) in L:
             if result not in self.targets:
                 self.targets[result] = len(self.targets)
-            new_features = [0 for i in range(self.chosen)]
-            for key, value in features.items():
-                enc = hash(key) % (2 * self.chosen)
-                #sign = -1 if enc < self.chosen else 1
-                sign = 1 # CAREEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEe
-                enc %= self.chosen
-                #new_features[enc] += value * 1.0 * sign
-                new_features[enc] = 1. # ZERO or ONE
-                self.words[enc].add(key)
-            compressed.append((numpy.array(new_features), self.targets[result], obj))
+            new_features = self.compress_features(features)
+            compressed.append((new_features, self.targets[result], obj))
         return compressed
 
 def feed(gnbs, objs):
@@ -444,6 +455,14 @@ def load_model(model_file):
     gnbs = pickle.load(model_file)
     counts = pickle.load(model_file)
     return (processor, comp, gnbs, counts)
+
+def classify((proc, comp, gnbs, counts), title, body):
+    gnb = gnbs[-1]
+    feat = proc.process_title_body(title, body)
+    cfeat = comp.compress_features(feat)
+    pred = gnb.predict([cfeat])
+    lookup = dict(map(lambda (a, b): (b, a), comp.targets.items()))[pred[0]]
+    return lookup
 
 def main():
     parser = argparse.ArgumentParser(description='Simple processing script')
