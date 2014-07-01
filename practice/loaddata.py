@@ -1,12 +1,12 @@
 import argparse
 
 def add_parser_arguments(parser):
-    parser.add_argument('-train_file', type=str, help='train file', required=True)
-    parser.add_argument('-cv_file', type=str, help='cv file', required=True)
+    parser.add_argument('-train_file', type=str, help='train file')
+    parser.add_argument('-cv_file', type=str, help='cv file')
 
 parser = argparse.ArgumentParser()
 add_parser_arguments(parser)
-args = parser.parse_args()
+args = parser.parse_known_args()
 
 def group(gen):
     while True:
@@ -18,6 +18,17 @@ def group(gen):
 def load_data(f):
     data = []
     return zip(*(list(group(iter(f.readlines())))))
+
+def raw_group(gen):
+    while True:
+        (title, body, res) = (next(gen).strip(), next(gen).strip(), next(gen).strip())
+        for result in res.split():
+            result = int(result)
+            yield (title, body, result)
+
+def raw_load_data(f):
+    data = []
+    return zip(*(list(raw_group(iter(f.readlines())))))
 
 def get_train():
     return load_data(open(args.train_file, "r"))
