@@ -4,32 +4,33 @@ import re
 import string
 
 L = []
-for line in open("data_list"):
-    if random.random() < 0.01:
-        L.append(line)
-
-filL = random.sample(L, 100)
+L = open("data_list").readlines()
 
 points = 0
 processed = 0
-for line in filL:
+while True:
+    line = random.choice(L)
     obj = json.loads(line.strip())
     title = re.sub("[^" + string.printable + "]", "", obj['title'])
     body = re.sub("[^" + string.printable + "]", "", obj['body'])
     print "Title: ", title
     print "Body: ", body
-    print "Output bug, enhancement or question"
-    res = raw_input()
-    res = res.strip()
+    while True:
+        print "Output b (bug), e (enhancement) or q (question)"
+        res = raw_input()
+        res = res.strip()
+        if res in "ebq":
+            break
     for label in obj['labels']:
-        if res == 'enhancement' \
+        if res == 'e' \
                 and (label['name'].lower() == 'enhancement' or label['name'].lower() == 'feature'):
             points += 1
             break
-        elif res != 'enhancement' and label['name'].lower() == res:
+        elif res == 'b' and label['name'].lower() == 'bug':
+            points += 1
+            break
+        elif res == 'q' and label['name'].lower() == 'question':
             points += 1
             break
     processed += 1
     print "Result: %s out of %s" % (points, processed)
-
-print "Final result: ", points
